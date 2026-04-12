@@ -120,6 +120,11 @@ function CalendarPage({ ctx }) {
           })}
         </div>
       </div>
+
+      {/* Sub-feature: Monthly Event Progress Tracker
+          Renders a progress bar below the grid showing how many of this
+          month's events have already passed. Hidden if the month has no events. */}
+      <MonthProgressBar year={year} month={month} allEvts={allEvts} />
     </div>
   );
 }
