@@ -275,23 +275,27 @@ function CalendarsPage({ ctx }) {
         {/* Owned codes quick-view */}
         <div className="card">
           <div style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:15, marginBottom:12 }}>Your Codes</div>
-          {cals.filter(c => c.isOwner && c.codes?.length > 0).length === 0
-            ? <div style={{ fontSize:13, color:"var(--text3)" }}>No shareable codes yet.</div>
-            : cals.filter(c => c.isOwner).map(c => c.codes?.map(cd => (
-                <div key={cd.codeId} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"7px 0", borderBottom:"1px solid var(--border)" }}>
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:500 }}>{c.name}</div>
-                    <div style={{ fontSize:11, color:"var(--text3)" }}>
-                      {cd.expiresAt ? `Expires ${fmtDate(cd.expiresAt)}` : "No expiry"}
-                    </div>
+          {(() => {
+            const codeRows = cals
+              .filter(c => c.isOwner && c.codes?.length > 0)
+              .flatMap(c => c.codes.map(cd => ({ ...cd, calName: c.name })));
+            if (codeRows.length === 0)
+              return <div style={{ fontSize:13, color:"var(--text3)" }}>No shareable codes yet.</div>;
+            return codeRows.map(cd => (
+              <div key={cd.codeId} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"7px 0", borderBottom:"1px solid var(--border)" }}>
+                <div>
+                  <div style={{ fontSize:13, fontWeight:500 }}>{cd.calName}</div>
+                  <div style={{ fontSize:11, color:"var(--text3)" }}>
+                    {cd.expiresAt ? `Expires ${fmtDate(cd.expiresAt)}` : "No expiry"}
                   </div>
-                  <span className="code-badge" style={{ cursor:"pointer" }}
-                    onClick={() => { navigator.clipboard?.writeText(cd.code); showToast("Copied!"); }}>
-                    {cd.code}
-                  </span>
                 </div>
-              ))
-            )}
+                <span className="code-badge" style={{ cursor:"pointer" }}
+                  onClick={() => { navigator.clipboard?.writeText(cd.code); showToast("Copied!"); }}>
+                  {cd.code}
+                </span>
+              </div>
+            ));
+          })()}
         </div>
       </div>
     </div>
@@ -430,7 +434,7 @@ function ManageCalendarModal({ ctx, calendar }) {
     setCodeLoading(true); setError("");
     try {
       const body = { id: calendar.id, code: newCode.trim() };
-      if (ttlDays) body.ttl = { seconds: parseInt(ttlDays) * 86400, nanos: 0 };
+      if (ttlDays) body.ttl = `${parseInt(ttlDays) * 86400}s`;
       await calApi("CreateCode", body, sessionId);
       showToast("Code created!");
       setNewCode(""); setTtlDays("");
