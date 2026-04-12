@@ -123,8 +123,8 @@ async function fetchAllCalendars(sid, calPrefs) {
       if (isOwner) {
         try {
           const codesRes=await calApi("GetCodes",{id},sid);
-          codes=await Promise.all((codesRes.code_ids||[]).map(async cid => {
-            try { const meta=await calApi("GetCodeMetadata",{code_id:cid},sid); return {codeId:cid,code:meta.code,expiresAt:meta.expires_at||null}; } catch(e){return null;}
+          codes=await Promise.all((codesRes.codeIds||[]).map(async cid => {
+            try { const meta=await calApi("GetCodeMetadata",{code_id:cid},sid); return {codeId:cid,code:meta.code,expiresAt:meta.expiresAt||null}; } catch(e){return null;}
           }));
           codes=codes.filter(Boolean);
         } catch(e) {}
@@ -208,7 +208,7 @@ function App() {
   }, [sessionId]);
 
   const refreshCalendars = useCallback(() => {
-    if (sessionId && currentUser) loadAllData(sessionId, currentUser.id);
+    if (sessionId && currentUser) return loadAllData(sessionId, currentUser.id);
   }, [sessionId, currentUser]);
 
   const navigateTo = (p) => { setPage(p); setSidebarOpen(false); };

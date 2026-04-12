@@ -37,6 +37,7 @@ function CalendarPage({ ctx }) {
     cells.push({ date: new Date(year, month+1, cells.length-daysInMonth-firstDay+1), isOtherMonth:true });
 
   const allEvts = myEvents().filter(e => visibleCals.includes(e.calendarId) && !(e.title||"").startsWith("TASK:"));
+  const allTasks = myEvents().filter(e => (e.title||"").startsWith("TASK:"));
   const today   = new Date();
   const monthNames = [
     "January","February","March","April","May","June",
@@ -115,16 +116,32 @@ function CalendarPage({ ctx }) {
                   );
                 })}
                 {more > 0 && <div className="cal-more">+{more}</div>}
+                {/* Task Progress Indicator */}
+                {(() => {
+                  const dayTasks = allTasks.filter(e => sameDay(e.startTime, cell.date.toISOString()));
+                  if (dayTasks.length === 0) return null;
+                  const total   = dayTasks.length;
+                  const done    = dayTasks.filter(e => /\nSTATUS:done/.test(e.description||"")).length;
+                  const inprog  = dayTasks.filter(e => /\nSTATUS:in-progress/.test(e.description||"")).length;
+                  const pct     = Math.round((done / total) * 100);
+                  const barColor = pct === 100 ? "var(--green)" : inprog > 0 ? "var(--blue)" : "var(--yellow)";
+                  return (
+                    <div className="cal-task-progress" title={`${done}/${total} tasks done`}>
+                      <div className="cal-task-progress-label">
+                        <span>📚 {done}/{total}</span>
+                        {pct === 100 && <span style={{color:"var(--green)",fontWeight:700}}>✓</span>}
+                      </div>
+                      <div className="cal-task-progress-track">
+                        <div className="cal-task-progress-bar" style={{width:`${pct}%`,background:barColor}} />
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
         </div>
       </div>
-
-      {/* Sub-feature: Monthly Event Progress Tracker
-          Renders a progress bar below the grid showing how many of this
-          month's events have already passed. Hidden if the month has no events. */}
-      <MonthProgressBar year={year} month={month} allEvts={allEvts} />
     </div>
   );
 }

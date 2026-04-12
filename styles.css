@@ -424,3 +424,32 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--text);
   font-size:17px; flex-shrink:0;
 }
 .theme-toggle:hover { color:var(--text); border-color:var(--border2); }
+
+/* ── Task Progress Indicator on Calendar Cells ── */
+.cal-task-progress {
+  margin-top: auto;
+  padding-top: 4px;
+}
+.cal-task-progress-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: .3px;
+  margin-bottom: 3px;
+}
+.cal-task-progress-track {
+  height: 5px;
+  background: var(--surface3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cal-task-progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .3s ease;
+}
+/* Make cal-cell a flex column so task progress bar sits at the bottom */
+.cal-cell { display: flex; flex-direction: column; }

@@ -80,7 +80,11 @@ function eventToTask(ev) {
   const title    = rawTitle.startsWith(TASK_PREFIX) ? rawTitle.slice(TASK_PREFIX.length) : rawTitle;
   const { description, checklist, status: storedStatus } = decodeDesc(ev.description);
   const { subject, type, priority } = decodeTaskLocation(ev.location);
-  const dueDate = ev.startTime ? ev.startTime.slice(0, 10) : "";
+  const _utcDate = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`; };
+  const _utcTime = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")}`; };
+  const dueDate = ev.startTime ? _utcDate(ev.startTime) : "";
+  const dueTime = ev.startTime ? _utcTime(ev.startTime) : "12:00";
+  const endTime = ev.endTime   ? _utcTime(ev.endTime)   : "";
 
   let status = storedStatus || "not-started";
   if (!storedStatus && checklist.length > 0) {
@@ -88,14 +92,18 @@ function eventToTask(ev) {
     status = done === 0 ? "not-started" : done === checklist.length ? "done" : "in-progress";
   }
 
-  return { id:ev.id, calendarId:ev.calendarId, title, subject, type, priority, description, checklist, dueDate, status, createdAt:ev.createdAt||new Date().toISOString() };
+  return { id:ev.id, calendarId:ev.calendarId, title, subject, type, priority, description, checklist, dueDate, dueTime, endTime, status, createdAt:ev.createdAt||new Date().toISOString() };
 }
 
 function taskToEvent(task, calendarId) {
-  const descFull = encodeDesc(task.description, task.checklist, task.status);
-  const dueDate  = task.dueDate || new Date().toISOString().slice(0, 10);
-  const startISO = new Date(`${dueDate}T00:00:00`).toISOString();
-  const endISO   = new Date(`${dueDate}T01:00:00`).toISOString();
+  const descFull  = encodeDesc(task.description, task.checklist, task.status);
+  const dueDate   = task.dueDate || new Date().toISOString().slice(0, 10);
+  const dueTime   = task.dueTime || "12:00";
+  const [sy,sm,sd] = dueDate.split("-").map(Number);
+  const [sh,smin]  = dueTime.split(":").map(Number);
+  const [eh,emin]  = addOneHour(dueTime).split(":").map(Number);
+  const startISO   = new Date(Date.UTC(sy, sm-1, sd, sh, smin, 0)).toISOString();
+  const endISO     = new Date(Date.UTC(sy, sm-1, sd, eh, emin, 0)).toISOString();
   return {
     id:         task.id || uid_gen(),
     calendarId,
@@ -107,6 +115,20 @@ function taskToEvent(task, calendarId) {
     isImportant:task.priority === "Urgent" || task.priority === "High",
     createdAt:  task.createdAt || new Date().toISOString(),
   };
+}
+
+function addOneHour(t) {
+  const [h, m] = (t || "12:00").split(":").map(Number);
+  const nh = Math.min(h + 1, 23);
+  return `${String(nh).padStart(2,"0")}:${String(m||0).padStart(2,"0")}`;
+}
+
+function formatTime12(t) {
+  if (!t) return "";
+  const [h, m] = t.split(":").map(Number);
+  const suffix = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2,"0")} ${suffix}`;
 }
 
 function computeStatus(checklist, fallback) {
@@ -165,7 +187,7 @@ function TaskTrackerPage({ ctx }) {
   const [typeFilter,   setTypeFilter]   = React.useState("all");
 
   const [showForm,    setShowForm]    = React.useState(false);
-  const [form,        setForm]        = React.useState({ title:"", subject:"", type:"Assignment", priority:"Medium", description:"", dueDate:"", checklist:[] });
+  const [form,        setForm]        = React.useState({ title:"", subject:"", type:"Assignment", priority:"Medium", description:"", dueDate:"", dueTime:"", checklist:[] });
   const [newCheckItem,setNewCheckItem]= React.useState("");
   const [editId,      setEditId]      = React.useState(null);
   const [formLoading, setFormLoading] = React.useState(false);
@@ -235,11 +257,11 @@ function TaskTrackerPage({ ctx }) {
 
   // ── Form helpers ──
   function openNew() {
-    setForm({ title:"", subject:"", type:"Assignment", priority:"Medium", description:"", dueDate:"", checklist:[] });
+    setForm({ title:"", subject:"", type:"Assignment", priority:"Medium", description:"", dueDate:"", dueTime:"", checklist:[] });
     setNewCheckItem(""); setEditId(null); setFormError(""); setShowForm(true);
   }
   function openEdit(task) {
-    setForm({ title:task.title, subject:task.subject||"", type:task.type||"Assignment", priority:task.priority||"Medium", description:task.description||"", dueDate:task.dueDate||"", checklist:(task.checklist||[]).map(i=>({...i,id:i.id||uid_gen()})) });
+    setForm({ title:task.title, subject:task.subject||"", type:task.type||"Assignment", priority:task.priority||"Medium", description:task.description||"", dueDate:task.dueDate||"", dueTime:task.dueTime||"", checklist:(task.checklist||[]).map(i=>({...i,id:i.id||uid_gen()})) });
     setNewCheckItem(""); setEditId(task.id); setFormError(""); setShowForm(true);
   }
   function addCheck() {
@@ -254,6 +276,7 @@ function TaskTrackerPage({ ctx }) {
     if (!form.title.trim()) { setFormError("Title is required."); return; }
     const cal = getTaskCal();
     if (!cal) { setFormError("No owned calendar found. Create a calendar first."); return; }
+    if (form.dueTime && !form.dueDate) { setFormError("Please select a due date when specifying a time."); return; }
     setFormLoading(true); setFormError("");
     try {
       const existing = editId ? tasks.find(t => t.id === editId) : null;
@@ -309,7 +332,7 @@ function TaskTrackerPage({ ctx }) {
     const checkDone  = task.checklist?.filter(i=>i.checked).length||0;
     const checkTotal = task.checklist?.length||0;
     const pct = checkTotal ? Math.round((checkDone/checkTotal)*100) : null;
-    const isOverdue = task.dueDate && task.status !== "done" && new Date(task.dueDate+"T00:00:00") < new Date();
+    const isOverdue = task.dueDate && task.status !== "done" && new Date(task.dueDate+"T12:00:00") < new Date();
 
     return (
       <div className="task-card" style={{ marginBottom:10 }}>
@@ -329,18 +352,6 @@ function TaskTrackerPage({ ctx }) {
           </div>
           {/* Actions */}
           <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
-            {checkTotal === 0 ? (
-              <select value={task.status} onChange={e=>setManualStatus(task.id,e.target.value)}
-                style={{ fontSize:10, background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:4, padding:"2px 5px", color:STATUS_COLOR[task.status], fontWeight:600, cursor:"pointer" }}>
-                <option value="not-started">Not Started</option>
-                <option value="in-progress">In Progress</option>
-                <option value="done">Completed</option>
-              </select>
-            ) : (
-              <span style={{ fontSize:10, padding:"2px 7px", borderRadius:4, background:"var(--surface2)", color:STATUS_COLOR[task.status], fontWeight:600, border:"1px solid var(--border)" }}>
-                {STATUS_LABEL[task.status]}
-              </span>
-            )}
             <button className="task-btn-edit" onClick={()=>openEdit(task)}>Edit</button>
             <button className="task-btn-del"  onClick={()=>deleteTask(task.id)}>✕</button>
           </div>
@@ -350,9 +361,28 @@ function TaskTrackerPage({ ctx }) {
         {task.dueDate && (
           <div style={{ fontSize:11, color:isOverdue?"var(--red)":"var(--text3)", marginBottom:6, fontWeight:isOverdue?700:400 }}>
             {isOverdue?"⚠️ Overdue — ":"📅 Due "}
-            {new Date(task.dueDate+"T00:00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
+            {new Date(task.dueDate+"T12:00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
+            {task.dueTime && task.dueTime !== "12:00" && (
+              <span style={{marginLeft:5}}>· {formatTime12(task.dueTime)}</span>
+            )}
           </div>
         )}
+        {/* Status track */}
+        <div style={{display:"flex",alignItems:"center",gap:0,background:"var(--surface2)",borderRadius:6,border:"1px solid var(--border)",overflow:"hidden",height:22,marginBottom:6}}>
+          {[["not-started","Not Started","var(--text3)"],["in-progress","In Progress","var(--blue)"],["done","Completed","var(--green)"]].map(([s,l,c])=>{
+            const active = task.status===s;
+            return (
+              <button key={s} onClick={checkTotal===0?()=>setManualStatus(task.id,s):undefined}
+                disabled={checkTotal>0}
+                style={{flex:1,border:"none",borderRadius:0,padding:"0 4px",fontSize:10,fontWeight:700,
+                  background:active?(s==="done"?"rgba(52,211,153,0.2)":s==="in-progress"?"rgba(96,165,250,0.2)":"rgba(90,90,120,0.25)"):"transparent",
+                  color:active?c:"var(--text3)",cursor:checkTotal===0?"pointer":"default",
+                  transition:"all .15s",letterSpacing:.3,height:"100%",borderLeft:s!=="not-started"?"1px solid var(--border)":"none"}}>
+                {active?"● ":""}{l}
+              </button>
+            );
+          })}
+        </div>
 
         {/* Description */}
         {task.description && (
@@ -425,7 +455,7 @@ function TaskTrackerPage({ ctx }) {
   }
 
   const cal = getTaskCal();
-  const overdueCount = tasks.filter(t => t.status!=="done" && t.dueDate && new Date(t.dueDate+"T00:00:00")<new Date()).length;
+  const overdueCount = tasks.filter(t => t.status!=="done" && t.dueDate && new Date(t.dueDate+"T12:00:00")<new Date()).length;
 
   return (
     <div>
@@ -528,11 +558,26 @@ function TaskTrackerPage({ ctx }) {
               placeholder="Instructions, reminders, page numbers, links…" />
           </div>
 
-          {/* Due Date */}
-          <div className="form-group">
-            <label className="form-label">Due Date <span style={{ color:"var(--text3)", fontWeight:400 }}>(optional)</span></label>
-            <input className="form-input" type="date" value={form.dueDate}
-              onChange={e=>setForm(f=>({...f,dueDate:e.target.value}))} />
+          {/* Due Date + Time */}
+          <div style={{ marginBottom:18 }}>
+            <label className="form-label">Due Date &amp; Time <span style={{ color:"var(--text3)", fontWeight:400 }}>(optional)</span></label>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <div>
+                <input className="form-input" type="date" value={form.dueDate}
+                  onChange={e => {
+                    const d = e.target.value;
+                    setForm(f => ({ ...f, dueDate:d, dueTime: f.dueTime || (d ? "12:00" : "") }));
+                  }} style={{ fontSize:13 }} />
+                <div className="form-hint">Date</div>
+              </div>
+              <div>
+                <input className="form-input" type="time" value={form.dueTime}
+                  disabled={!form.dueDate}
+                  onChange={e => setForm(f => ({ ...f, dueTime:e.target.value }))}
+                  style={{ fontSize:13, opacity:form.dueDate?1:0.45 }} />
+                <div className="form-hint">Due time</div>
+              </div>
+            </div>
           </div>
 
           {/* Checklist */}
