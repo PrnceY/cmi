@@ -35,8 +35,18 @@ function CalendarsPage({ ctx }) {
     setExpandedMembers(prev => ({ ...prev, [calId]: { loading: true, list: [], error: "" } }));
     try {
       const r = await calApi("GetMembers", { id: numId }, sessionId);
-      const ids = r.user_ids || [];
-      const list = ids.map(uid => ({ uid }));
+      const ids = r.userIds || r.user_ids || [];
+      const list = await Promise.all(
+        ids.map(async uid => {
+          try {
+            const u = await apiCall("/users.v1.UserService/Get", { id: uid }, sessionId);
+            const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || `User #${uid}`;
+            return { uid, name, email: u.email || "" };
+          } catch {
+            return { uid, name: `User #${uid}`, email: "" };
+          }
+        })
+      );
       setExpandedMembers(prev => ({ ...prev, [calId]: { loading: false, list, error: "", count: ids.length } }));
     } catch(e) {
       setExpandedMembers(prev => ({ ...prev, [calId]: { loading: false, list: [], error: e.message, count: 0 } }));
@@ -206,12 +216,15 @@ function CalendarsPage({ ctx }) {
                     )}
                     {!expandedMembers[c.id].loading && expandedMembers[c.id].list.map(m => (
                       <div key={m.uid} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border)" }}>
-                        <div style={{ width:28, height:28, borderRadius:"50%", background:avatarColor(String(m.uid)),
+                        <div style={{ width:28, height:28, borderRadius:"50%", background:avatarColor(m.name || String(m.uid)),
                           display:"flex", alignItems:"center", justifyContent:"center",
                           fontWeight:700, fontSize:11, color:"#fff", flexShrink:0 }}>
-                          #{m.uid}
+                          {(m.name || `#${m.uid}`).split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}
                         </div>
-                        <div style={{ fontSize:13, fontWeight:600, color:"var(--text2)" }}>User #{m.uid}</div>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:600, color:"var(--text2)" }}>{m.name || `User #${m.uid}`}</div>
+                          {m.email && <div style={{ fontSize:11, color:"var(--text3)" }}>{m.email}</div>}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -384,8 +397,19 @@ function ManageCalendarModal({ ctx, calendar }) {
     setMembLoading(true); setError("");
     try {
       const r = await calApi("GetMembers", { id: Number(calendar.id) }, sessionId);
-      const ids = r.user_ids || [];
-      setMembers(ids.map(uid => ({ uid, name: `User #${uid}`, email: "" })));
+      const ids = r.userIds || r.user_ids || [];
+      const members = await Promise.all(
+        ids.map(async uid => {
+          try {
+            const u = await apiCall("/users.v1.UserService/Get", { id: uid }, sessionId);
+            const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || `User #${uid}`;
+            return { uid, name, email: u.email || "" };
+          } catch {
+            return { uid, name: `User #${uid}`, email: "" };
+          }
+        })
+      );
+      setMembers(members);
     } catch(e) { setError(`Failed to load members: ${e.message}`); }
     finally { setMembLoading(false); }
   }
@@ -583,4 +607,3 @@ function ManageCalendarModal({ ctx, calendar }) {
 // ═══════════════════════════════════════════════════════════
 // CUSTOM CALENDAR — CstmCal.jsx
 // ═══════════════════════════════════════════════════════════
-
