@@ -238,7 +238,10 @@ function EventListItem({ event, ctx, showDate, full }) {
 function CreateEventModal({ ctx, initial }) {
   const { sessionId, myCalendars, events, setEvents, closeModal, showToast } = ctx;
   const cals = myCalendars();
-  const defaultCal = initial?.calendarId || cals[0]?.id || "";
+  const ownedCals = cals.filter(c => c.isOwner);
+  const defaultCal = initial?.calendarId
+    ? (cals.find(c => c.id === initial.calendarId && c.isOwner) ? initial.calendarId : ownedCals[0]?.id || "")
+    : ownedCals[0]?.id || "";
   const todayStr = initial?.date
     ? `${initial.date.getFullYear()}-${String(initial.date.getMonth()+1).padStart(2,"0")}-${String(initial.date.getDate()).padStart(2,"0")}`
     : new Date().toISOString().slice(0,10);
@@ -255,6 +258,8 @@ function CreateEventModal({ ctx, initial }) {
   async function submit() {
     if (!form.title) { setError("Title is required."); return; }
     if (!form.calendarId) { setError("Please select a calendar."); return; }
+    const selectedCal = cals.find(c => String(c.id) === String(form.calendarId));
+    if (!selectedCal?.isOwner) { setError("You can only add events to calendars you own."); return; }
 
     // Sub-feature: Event Date/Time Picker & Validation
     const st = new Date(`${form.date}T${form.startTime}`).toISOString();
@@ -291,6 +296,9 @@ function CreateEventModal({ ctx, initial }) {
         </div>
         <div className="modal-body">
           {error && <div className="error-msg">{error}</div>}
+          {ownedCals.length === 0 && (
+            <div className="error-msg">You don't own any calendars yet. Create one first from the Calendars page.</div>
+          )}
           <div className="form-group">
             <label className="form-label">Title *</label>
             <input className="form-input" value={form.title}
@@ -299,7 +307,7 @@ function CreateEventModal({ ctx, initial }) {
           <div className="form-group">
             <label className="form-label">Calendar</label>
             <select className="select" value={form.calendarId} onChange={e => up("calendarId", e.target.value)}>
-              {cals.filter(c => c.isOwner).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {ownedCals.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           {/* Sub-feature: Event Date/Time Picker */}
@@ -338,7 +346,7 @@ function CreateEventModal({ ctx, initial }) {
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={closeModal}>Cancel</button>
-          <button className="btn btn-primary" onClick={submit} disabled={loading}>
+          <button className="btn btn-primary" onClick={submit} disabled={loading || ownedCals.length === 0}>
             {loading ? "Saving…" : "Create Event"}
           </button>
         </div>

@@ -246,7 +246,7 @@ function CalendarsPage({ ctx }) {
 // Sub-feature: Create Calendar UI + Create Calendar API Integration
 function CreateCalendarModal({ ctx }) {
   const { sessionId, closeModal, showToast, refreshCalendars } = ctx;
-  const [form, setForm] = React.useState({ name:"", description:"", membersOnly:false, color:"#6c63ff" });
+  const [form, setForm] = React.useState({ name:"", description:"", color:"#6c63ff" });
   const [error, setError]   = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
@@ -258,7 +258,6 @@ function CreateCalendarModal({ ctx }) {
       await calApi("Create", {
         name:         form.name,
         description:  form.description || undefined,
-        members_only: form.membersOnly,
         color:        form.color.replace("#", ""),
         ical: btoa("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//USCCalendar//EN\r\nEND:VCALENDAR"),
       }, sessionId);
@@ -289,14 +288,6 @@ function CreateCalendarModal({ ctx }) {
             <input className="form-input" value={form.description}
               onChange={e => setForm(f => ({ ...f, description:e.target.value }))}
               placeholder="What is this calendar for?" />
-          </div>
-          <div className="toggle-row">
-            <span style={{ fontSize:13, fontWeight:500 }}>🔒 Members Only</span>
-            <label className="toggle">
-              <input type="checkbox" checked={form.membersOnly}
-                onChange={e => setForm(f => ({ ...f, membersOnly:e.target.checked }))} />
-              <span className="toggle-slider" />
-            </label>
           </div>
           {/* Color picker — saved to localStorage after creation */}
           <div className="form-group" style={{ marginTop:16 }}>
@@ -337,7 +328,6 @@ function ManageCalendarModal({ ctx, calendar }) {
   const [membLoading, setMembLoading] = React.useState(false);
   const [metaName, setMetaName]     = React.useState(calendar.name);
   const [metaDesc, setMetaDesc]     = React.useState(calendar.description || "");
-  const [metaOnly, setMetaOnly]     = React.useState(calendar.membersOnly || false);
   const [metaLoading, setMetaLoading] = React.useState(false);
   const [error, setError]           = React.useState("");
   const prefs = loadCalPrefs();
@@ -406,7 +396,7 @@ function ManageCalendarModal({ ctx, calendar }) {
     setMetaLoading(true); setError("");
     try {
       await calApi("UpdateMetadata", {
-        id: calendar.id, name: metaName, description: metaDesc, members_only: metaOnly,
+        id: calendar.id, name: metaName, description: metaDesc,
       }, sessionId);
       // Color for owned calendars is set at creation; update localStorage for display
       const p = loadCalPrefs();
@@ -523,13 +513,6 @@ function ManageCalendarModal({ ctx, calendar }) {
             <div className="form-group">
               <label className="form-label">Description</label>
               <input className="form-input" value={metaDesc} onChange={e => setMetaDesc(e.target.value)} />
-            </div>
-            <div className="toggle-row">
-              <span style={{ fontSize:13, fontWeight:500 }}>🔒 Members Only</span>
-              <label className="toggle">
-                <input type="checkbox" checked={metaOnly} onChange={e => setMetaOnly(e.target.checked)} />
-                <span className="toggle-slider" />
-              </label>
             </div>
             {/* Color stored in localStorage only */}
             <div className="form-group" style={{ marginTop:16 }}>
