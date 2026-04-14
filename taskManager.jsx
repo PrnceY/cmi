@@ -419,7 +419,6 @@ function TaskTrackerPage({ ctx }) {
       <div className="empty-state">
         <div className="empty-icon">📚</div>
         <div className="empty-title">No tasks found</div>
-        <button className="btn btn-primary btn-sm" style={{marginTop:12}} onClick={openNew}>+ Add Task</button>
       </div>
     );
   }
@@ -481,7 +480,7 @@ function TaskTrackerPage({ ctx }) {
           {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         <div style={{ flex:1 }} />
-        <button className="btn btn-primary btn-sm" onClick={openNew} disabled={!cal}>+ Add Task</button>
+        <button className="btn btn-primary" onClick={openNew} disabled={!cal} style={{ width:"100%" }}>+ Add Task</button>
       </div>
 
       {/* Task form */}

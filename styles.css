@@ -93,8 +93,8 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--text);
   padding-right: 3px;
 }.sidebar-user { padding:14px 18px; display:flex; align-items:center; gap:11px; border-bottom:1px solid var(--border); }
 .user-avatar { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-family:var(--font-head); font-weight:700; font-size:14px; flex-shrink:0; }
-.user-info { flex:1; min-width:0; }
-.user-name { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.user-info { flex:1; min-width:0; overflow:hidden; }
+.user-name { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
 .user-badge { font-size:10px; color:var(--accent2); background:rgba(167,139,250,0.15); padding:2px 7px; border-radius:20px; display:inline-block; margin-top:2px; font-weight:600; }
 .sidebar-nav { flex:1; overflow-y:auto; padding:12px 10px; }
 .nav-section { margin-bottom:20px; }

@@ -106,13 +106,12 @@ function uid_gen()    { return Math.random().toString(36).slice(2,10); }
 function fmtTime(iso) { return new Date(iso).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
 function fmtDate(iso) { return new Date(iso).toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}); }
 function sameDay(a,b) { const da=new Date(a),db=new Date(b); return da.getFullYear()===db.getFullYear()&&da.getMonth()===db.getMonth()&&da.getDate()===db.getDate(); }
-function isUscEmail(e){ return e.endsWith("@usc.edu.ph"); }
 function avatarColor(name) { const c=["#6c63ff","#34d399","#fbbf24","#f472b6","#60a5fa","#fb923c"]; let h=0; for(const ch of (name||"?")) h=(h+ch.charCodeAt(0))%c.length; return c[h]; }
 const PALETTE = ["#6c63ff","#34d399","#fbbf24","#f472b6","#60a5fa","#fb923c","#f87171","#2dd4bf"];
 function pickColor(id) { return PALETTE[Math.abs(id||0) % PALETTE.length]; }
 function buildUser(profile, sid) {
   const p=profile.user||profile, email=p.email||"", fullName=[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(" ");
-  return { id:sid, email, name:fullName||email, first_name:p.first_name||"", last_name:p.last_name||"", middle_name:p.middle_name||"", userType:isUscEmail(email)?"usc":"regular" };
+  return { id:sid, email, name:fullName||email, first_name:p.first_name||"", last_name:p.last_name||"", middle_name:p.middle_name||"", userType:"student" };
 }
 
 // ✅ Fetch calendars + events from API, merge localStorage color prefs on top
@@ -304,7 +303,7 @@ function AuthPage({ onLogin }) {
       const sid = r.session_id;
       if (!sid) throw new Error("No session returned.");
       const user = buildUser(r, sid);
-      const finalUser = user.email ? user : { ...user, email, name: email, userType: isUscEmail(email)?"usc":"regular" };
+      const finalUser = user.email ? user : { ...user, email, name: email, userType: "student" };
       onLogin(finalUser, sid);
     } catch(e) { setError(e.message || "Login failed. Check your credentials."); }
     finally { setLoading(false); }
@@ -323,7 +322,7 @@ function AuthPage({ onLogin }) {
       const finalUser = user.email ? user : {
         id:sid, email, name:[firstName,middleName,lastName].filter(Boolean).join(" ")||email,
         first_name:firstName, last_name:lastName, middle_name:middleName,
-        userType: isUscEmail(email)?"usc":"regular"
+        userType: "student"
       };
       onLogin(finalUser, sid);
     } catch(e) { setError(e.message || "Registration failed. That email may already be in use."); }
@@ -377,7 +376,7 @@ function Sidebar({ page, setPage, ctx, isOpen }) {
         <div className="user-avatar" style={{background:ac}}>{currentUser.name.split(" ").map(w=>w[0]).join("").slice(0,2)}</div>
         <div className="user-info">
           <div className="user-name">{currentUser.name}</div>
-          <div className="user-badge">{currentUser.userType==="usc"?"USC User":"Regular"}</div>
+          <div className="user-badge">Student</div>
         </div>
       </div>
       <div className="sidebar-nav">
@@ -562,7 +561,7 @@ function SettingsPage({ ctx }) {
         <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:18}}>Profile</div>
         <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:24}}>
           <div className="user-avatar" style={{background:ac,width:56,height:56,fontSize:20}}>{currentUser.name.split(" ").map(w=>w[0]).join("").slice(0,2)}</div>
-          <div><div style={{fontWeight:700,fontSize:16}}>{currentUser.name}</div><div style={{fontSize:13,color:"var(--text3)"}}>{currentUser.email}</div><div className="user-badge" style={{marginTop:4}}>{currentUser.userType==="usc"?"🎓 USC User":"👤 Regular"}</div></div>
+          <div><div style={{fontWeight:700,fontSize:16}}>{currentUser.name}</div><div style={{fontSize:13,color:"var(--text3)"}}>{currentUser.email}</div><div className="user-badge" style={{marginTop:4}}>🎓 Student</div></div>
         </div>
         {profileError&&<div className="error-msg">{profileError}</div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -582,7 +581,7 @@ function SettingsPage({ ctx }) {
       <div className="card mb-4">
         <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:14}}>Account Info</div>
         <div className="info-row"><div className="info-label">Email</div><div className="info-val">{currentUser.email}</div></div>
-        <div className="info-row"><div className="info-label">User Type</div><div className="info-val">{currentUser.userType==="usc"?"USC User":"Regular User"}</div></div>
+        <div className="info-row"><div className="info-label">User Type</div><div className="info-val">Student</div></div>
       </div>
       <div className="card">
         <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:14,color:"var(--red)"}}>Danger Zone</div>

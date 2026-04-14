@@ -24,35 +24,6 @@ function CalendarsPage({ ctx }) {
   const [joinError, setJoinError]   = React.useState("");
   const [joinSuccess, setJoinSuccess] = React.useState("");
   const [joinLoading, setJoinLoading] = React.useState(false);
-  const [expandedMembers, setExpandedMembers] = React.useState({});
-
-  async function toggleMembers(calId) {
-    if (expandedMembers[calId]) {
-      setExpandedMembers(prev => { const n = {...prev}; delete n[calId]; return n; });
-      return;
-    }
-    const numId = Number(calId);
-    setExpandedMembers(prev => ({ ...prev, [calId]: { loading: true, list: [], error: "" } }));
-    try {
-      const r = await calApi("GetMembers", { id: numId }, sessionId);
-      const ids = r.userIds || r.user_ids || [];
-      const list = await Promise.all(
-        ids.map(async uid => {
-          try {
-            const u = await apiCall("/users.v1.UserService/Get", { id: uid }, sessionId);
-            const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || `User #${uid}`;
-            return { uid, name, email: u.email || "" };
-          } catch {
-            return { uid, name: `User #${uid}`, email: "" };
-          }
-        })
-      );
-      setExpandedMembers(prev => ({ ...prev, [calId]: { loading: false, list, error: "", count: ids.length } }));
-    } catch(e) {
-      setExpandedMembers(prev => ({ ...prev, [calId]: { loading: false, list: [], error: e.message, count: 0 } }));
-    }
-  }
-
   const cals     = myCalendars();
   const filtered = tab === "all"
     ? cals
@@ -201,55 +172,24 @@ function CalendarsPage({ ctx }) {
                       onClick={() => handleLeave(c)}>Leave</button>
                   )}
 
-                  {c.isOwner && (
-                    <button className="btn btn-ghost btn-sm" style={{ marginLeft:"auto" }}
-                      onClick={() => toggleMembers(c.id)}>
-                      {expandedMembers[c.id] ? "▲ Hide" : "👥 Members"}
-                    </button>
-                  )}
+
                 </div>
 
-                {expandedMembers[c.id] && (
-                  <div style={{ marginTop:10, borderTop:"1px solid var(--border)", paddingTop:10 }}>
-                    <div style={{ fontSize:11, fontWeight:700, color:"var(--text3)", letterSpacing:.5, marginBottom:8 }}>
-                      JOINED MEMBERS
-                    </div>
-                    {expandedMembers[c.id].loading && (
-                      <div style={{ fontSize:12, color:"var(--text3)" }}>Loading…</div>
-                    )}
-                    {!expandedMembers[c.id].loading && expandedMembers[c.id].error && (
-                      <div style={{ fontSize:12, color:"var(--red)" }}>⚠ {expandedMembers[c.id].error}</div>
-                    )}
-                    {!expandedMembers[c.id].loading && !expandedMembers[c.id].error && expandedMembers[c.id].list.length === 0 && (
-                      <div style={{ fontSize:12, color:"var(--text3)" }}>No one has joined yet.</div>
-                    )}
-                    {!expandedMembers[c.id].loading && expandedMembers[c.id].list.map(m => (
-                      <div key={m.uid} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border)" }}>
-                        <div style={{ width:28, height:28, borderRadius:"50%", background:avatarColor(m.name || String(m.uid)),
-                          display:"flex", alignItems:"center", justifyContent:"center",
-                          fontWeight:700, fontSize:11, color:"#fff", flexShrink:0 }}>
-                          {(m.name || `#${m.uid}`).split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}
-                        </div>
-                        <div>
-                          <div style={{ fontSize:13, fontWeight:600, color:"var(--text2)" }}>{m.name || `User #${m.uid}`}</div>
-                          {m.email && <div style={{ fontSize:11, color:"var(--text3)" }}>{m.email}</div>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+
               </div>
             );
           })}
 
-          {/* Sub-feature: Create Calendar UI – opens CreateCalendarModal */}
-          <div className="cal-card"
-            style={{ border:"1.5px dashed var(--border2)", cursor:"pointer", alignItems:"center",
-              display:"flex", flexDirection:"column", justifyContent:"center", minHeight:120 }}
-            onClick={() => setModal({ type:"create-calendar" })}>
-            <div style={{ fontSize:24, marginBottom:6, opacity:.5 }}>＋</div>
-            <div style={{ color:"var(--text3)", fontSize:13, fontWeight:600 }}>Create Calendar</div>
-          </div>
+          {/* Sub-feature: Create Calendar UI – opens CreateCalendarModal (hidden on Joined tab) */}
+          {tab !== "subscribed" && (
+            <div className="cal-card"
+              style={{ border:"1.5px dashed var(--border2)", cursor:"pointer", alignItems:"center",
+                display:"flex", flexDirection:"column", justifyContent:"center", minHeight:120 }}
+              onClick={() => setModal({ type:"create-calendar" })}>
+              <div style={{ fontSize:24, marginBottom:6, opacity:.5 }}>＋</div>
+              <div style={{ color:"var(--text3)", fontSize:13, fontWeight:600 }}>Create Calendar</div>
+            </div>
+          )}
         </div>
       </div>
 

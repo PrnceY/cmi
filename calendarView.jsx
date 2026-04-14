@@ -155,7 +155,7 @@ function EventsPage({ ctx }) {
   return (
     <div>
       {/* Filter bar */}
-      <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
+      <div style={{ display:"flex", gap:10, marginBottom:10, flexWrap:"wrap" }}>
         <div className="search-wrap" style={{ flex:1, minWidth:200 }}>
           <span className="search-icon">🔍</span>
           <input className="search-input" value={search}
@@ -168,9 +168,12 @@ function EventsPage({ ctx }) {
         </select>
         <button className={`btn btn-sm ${filterImportant?"btn-primary":"btn-ghost"}`}
           onClick={() => setFilterImportant(!filterImportant)}>⭐ Important</button>
-        <button className="btn btn-primary btn-sm"
-          onClick={() => setModal({ type:"create-event" })}>+ New</button>
       </div>
+
+      {/* Create Event button — below search bar */}
+      <button className="btn btn-primary btn-sm"
+        style={{ width:"100%", marginBottom:20 }}
+        onClick={() => setModal({ type:"create-event" })}>+ Create Event</button>
 
       {/* Sub-feature: Upcoming Events List */}
       {upcoming.length > 0 && (
@@ -195,9 +198,10 @@ function EventsPage({ ctx }) {
         <div className="empty-state">
           <div className="empty-icon">🗓</div>
           <div className="empty-title">No events found</div>
-          <button className="btn btn-primary btn-sm" onClick={() => setModal({ type:"create-event" })}>+ Create Event</button>
         </div>
       )}
+
+
     </div>
   );
 }
@@ -534,4 +538,3 @@ function CalendarEventsModal({ ctx, calendar }) {
 // ═══════════════════════════════════════════════════════════
 // TASK TRACKER — tskmn.jsx
 // ═══════════════════════════════════════════════════════════
-
