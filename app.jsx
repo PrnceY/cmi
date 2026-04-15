@@ -86,6 +86,14 @@ function icalEscape(s)       { return (s||"").replace(/\n/g,"\\n").replace(/,/g,
 function icalUnescape(s)     { return (s||"").replace(/\\n/g,"\n").replace(/\\,/g,",").replace(/\\;/g,";"); }
 function eventsToIcalB64(ev) { return btoa(unescape(encodeURIComponent(eventsToIcal(ev)))); }
 
+// Fetch full user profile: GetSelf → Get(id) to retrieve first_name/last_name
+async function fetchUserProfile(sid) {
+  const selfRes = await apiCall("/users.v1.UserService/GetSelf", {}, sid);
+  const id = selfRes.id;
+  if (!id) throw new Error("Could not determine user id.");
+  return apiCall("/users.v1.UserService/Get", { id }, sid);
+}
+
 // Session token in localStorage — used to authenticate API calls
 const SESSION_KEY = "usc_session_id";
 function saveSession(sid) { try { localStorage.setItem(SESSION_KEY, sid); }       catch(e){} }
@@ -184,7 +192,7 @@ useEffect(() => {
   console.log("Saved session:", saved); 
   if (!saved) { setAuthLoading(false); return; }
 
-  apiCall("/users.v1.UserService/Get", {}, saved)
+  fetchUserProfile(saved)
     .then(profile => {
       console.log("Profile response:", profile); 
       const u = buildUser(profile, saved);
@@ -307,7 +315,10 @@ function AuthPage({ onLogin }) {
       const r = await apiCall("/users.v1.UserService/Login", {email, password});
       const sid = r.session_id;
       if (!sid) throw new Error("No session returned.");
-      const user = buildUser(r, sid);
+      // Fetch full profile so first_name/last_name are always available
+      let profile = r;
+      try { profile = await fetchUserProfile(sid); } catch(e) {}
+      const user = buildUser(profile, sid);
       const finalUser = user.email ? user : { ...user, email, name: email, userType: "student" };
       onLogin(finalUser, sid);
     } catch(e) { setError(e.message || "Login failed. Check your credentials."); }
@@ -323,8 +334,11 @@ function AuthPage({ onLogin }) {
       const r = await apiCall("/users.v1.UserService/Create", body);
       const sid = r.session_id;
       if (!sid) throw new Error("Registration failed.");
-      const user = buildUser(r, sid);
-      const finalUser = user.email ? user : {
+      // Fetch full profile to confirm stored name fields
+      let profile = r;
+      try { profile = await fetchUserProfile(sid); } catch(e) {}
+      const user = buildUser(profile, sid);
+      const finalUser = (user.first_name || user.last_name) ? user : {
         id:sid, email, name:[firstName,middleName,lastName].filter(Boolean).join(" ")||email,
         first_name:firstName, last_name:lastName, middle_name:middleName,
         userType: "student"
@@ -378,9 +392,10 @@ function Sidebar({ page, setPage, ctx, isOpen }) {
     <div className={`sidebar${isOpen?" open":""}`}>
       <div className="sidebar-logo"><span className="logo-sched">Sched</span><span className="logo-u">U</span></div>
       <div className="sidebar-user">
-        <div className="user-avatar" style={{background:ac}}>{currentUser.name.split(" ").map(w=>w[0]).join("").slice(0,2)}</div>
+        <div className="user-avatar" style={{background:ac}}>{currentUser.name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</div>
         <div className="user-info">
-          <div className="user-name">{currentUser.name}</div>
+          <div className="user-name">{[currentUser.first_name, currentUser.last_name].filter(Boolean).join(" ") || currentUser.name}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUser.email}</div>
           <div className="user-badge">Student</div>
         </div>
       </div>
@@ -438,7 +453,7 @@ function Dashboard({ ctx, setPage }) {
   return (
     <div>
       <div style={{marginBottom:20}}>
-        <div style={{fontFamily:"Syne,sans-serif",fontSize:22,fontWeight:800,marginBottom:4}}>Good {today.getHours()<12?"morning":today.getHours()<17?"afternoon":"evening"}, {currentUser.name.split(" ")[0]}! 👋</div>
+        <div style={{fontFamily:"Syne,sans-serif",fontSize:22,fontWeight:800,marginBottom:4}}>Good {today.getHours()<12?"morning":today.getHours()<17?"afternoon":"evening"}, {currentUser.first_name || currentUser.name.split(" ")[0]}! 👋</div>
         <div style={{color:"var(--text2)",fontSize:13}}>{today.toLocaleDateString("en-PH",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
       </div>
       <div className="stats-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20}}>
@@ -529,8 +544,20 @@ function SettingsPage({ ctx }) {
       if(lastName)  body.last_name=lastName;
       body.middle_name=middleName||"";
       await apiCall("/users.v1.UserService/Update",body,sessionId);
-      const fullName=[firstName,middleName,lastName].filter(Boolean).join(" ");
-      setCurrentUser(p=>({...p,name:fullName||p.email,first_name:firstName,last_name:lastName,middle_name:middleName}));
+      // Refresh from server to confirm what was saved
+      let updatedFirst=firstName, updatedLast=lastName, updatedMiddle=middleName;
+      try {
+        const profile = await fetchUserProfile(sessionId);
+        const p = profile.user||profile;
+        updatedFirst  = p.first_name  || firstName;
+        updatedLast   = p.last_name   || lastName;
+        updatedMiddle = p.middle_name || middleName;
+        setFirstName(updatedFirst);
+        setLastName(updatedLast);
+        setMiddleName(updatedMiddle);
+      } catch(e) {}
+      const fullName=[updatedFirst,updatedMiddle,updatedLast].filter(Boolean).join(" ");
+      setCurrentUser(p=>({...p,name:fullName||p.email,first_name:updatedFirst,last_name:updatedLast,middle_name:updatedMiddle}));
       showToast("Profile updated!");
     } catch(e) { setProfileError(e.message||"Failed to update profile."); }
     finally { setProfileLoading(false); }
@@ -565,8 +592,12 @@ function SettingsPage({ ctx }) {
       <div className="card mb-4">
         <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:18}}>Profile</div>
         <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:24}}>
-          <div className="user-avatar" style={{background:ac,width:56,height:56,fontSize:20}}>{currentUser.name.split(" ").map(w=>w[0]).join("").slice(0,2)}</div>
-          <div><div style={{fontWeight:700,fontSize:16}}>{currentUser.name}</div><div style={{fontSize:13,color:"var(--text3)"}}>{currentUser.email}</div><div className="user-badge" style={{marginTop:4}}>🎓 Student</div></div>
+          <div className="user-avatar" style={{background:ac,width:56,height:56,fontSize:20}}>{[currentUser.first_name,currentUser.last_name].filter(Boolean).map(w=>w[0]).join("").slice(0,2).toUpperCase()||currentUser.name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</div>
+          <div>
+            <div style={{fontWeight:700,fontSize:16}}>{[currentUser.first_name,currentUser.last_name].filter(Boolean).join(" ")||currentUser.name}</div>
+            <div style={{fontSize:13,color:"var(--text3)"}}>{currentUser.email}</div>
+            <div className="user-badge" style={{marginTop:4}}>🎓 Student</div>
+          </div>
         </div>
         {profileError&&<div className="error-msg">{profileError}</div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
