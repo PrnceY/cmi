@@ -36,7 +36,7 @@ function CalendarPage({ ctx }) {
   while (cells.length % 7 !== 0)
     cells.push({ date: new Date(year, month+1, cells.length-daysInMonth-firstDay+1), isOtherMonth:true });
 
-  const allEvts = myEvents().filter(e => visibleCals.includes(e.calendarId) && !(e.title||"").startsWith("TASK:"));
+  const allEvts = myEvents().filter(e => visibleCals.map(strId).includes(strId(e.calendarId)) && !(e.title||"").startsWith("TASK:"));
   const today   = new Date();
   const monthNames = [
     "January","February","March","April","May","June",
@@ -145,7 +145,7 @@ function EventsPage({ ctx }) {
       e.title.toLowerCase().includes(search.toLowerCase()) ||
       e.description?.toLowerCase().includes(search.toLowerCase())
     );
-  if (filterCal !== "all") evts = evts.filter(e => e.calendarId === filterCal);
+  if (filterCal !== "all") evts = evts.filter(e => strId(e.calendarId) === strId(filterCal));
   if (filterImportant) evts = evts.filter(e => e.isImportant);
 
   const now = new Date();
@@ -210,7 +210,7 @@ function EventsPage({ ctx }) {
 // Used by both features; lives here because it belongs to event display.
 function EventListItem({ event, ctx, showDate, full }) {
   const { myCalendars, setModal } = ctx;
-  const cal = myCalendars().find(c => c.id === event.calendarId);
+  const cal = myCalendars().find(c => strId(c.id) === strId(event.calendarId));
   return (
     <div className="event-item" onClick={() => setModal({ type:"event-detail", data:event })}>
       <div className="event-dot" style={{ background: cal?.color || "var(--accent)" }} />
@@ -258,7 +258,7 @@ function CreateEventModal({ ctx, initial }) {
   async function submit() {
     if (!form.title) { setError("Title is required."); return; }
     if (!form.calendarId) { setError("Please select a calendar."); return; }
-    const selectedCal = cals.find(c => String(c.id) === String(form.calendarId));
+    const selectedCal = cals.find(c => strId(c.id) === strId(form.calendarId));
     if (!selectedCal?.isOwner) { setError("You can only add events to calendars you own."); return; }
 
     // Sub-feature: Event Date/Time Picker & Validation
@@ -268,7 +268,7 @@ function CreateEventModal({ ctx, initial }) {
 
     setLoading(true);
     try {
-      const calId = Number(form.calendarId);
+      const calId = strId(form.calendarId);
       const newEvent = {
         id: uid_gen(), calendarId: calId,
         title: form.title, description: form.description,
@@ -277,9 +277,9 @@ function CreateEventModal({ ctx, initial }) {
         createdAt: new Date().toISOString(),
       };
       // Sub-feature: Create Event — merge iCal and push to API
-      const calEvents = events.filter(e => e.calendarId === calId);
+      const calEvents = events.filter(e => strId(e.calendarId) === calId);
       calEvents.push(newEvent);
-      await calApi("Merge", { id: calId, ical: eventsToIcalB64(calEvents) }, sessionId);
+      await calApi("WriteCalendar", { calendarId: Number(calId), ical: eventsToIcalB64(calEvents) }, sessionId);
       setEvents(prev => [...prev, newEvent]);
       showToast(`"${form.title}" created!`);
       closeModal();
@@ -360,7 +360,7 @@ function CreateEventModal({ ctx, initial }) {
 // Sub-feature: Create / Edit / Delete Event (edit + delete side)
 function EventDetailModal({ ctx, event }) {
   const { sessionId, myCalendars, events, setEvents, closeModal, showToast } = ctx;
-  const cal     = myCalendars().find(c => c.id === event.calendarId);
+  const cal     = myCalendars().find(c => strId(c.id) === strId(event.calendarId));
   const canEdit = cal?.isOwner;
   const [editing, setEditing] = React.useState(false);
   const [form, setForm] = React.useState({
@@ -375,10 +375,10 @@ function EventDetailModal({ ctx, event }) {
   async function saveEdit() {
     setLoading(true);
     try {
-      const calId = Number(event.calendarId);
+      const calId = strId(event.calendarId);
       const updatedEvent = { ...event, ...form };
-      const calEvents = events.map(e => e.id===event.id ? updatedEvent : e).filter(e => e.calendarId===calId);
-      await calApi("Replace", { id: calId, ical: eventsToIcalB64(calEvents) }, sessionId);
+      const calEvents = events.map(e => e.id===event.id ? updatedEvent : e).filter(e => strId(e.calendarId)===calId);
+      await calApi("WriteCalendar", { calendarId: Number(calId), ical: eventsToIcalB64(calEvents) }, sessionId);
       setEvents(prev => prev.map(e => e.id===event.id ? updatedEvent : e));
       showToast("Event updated!"); closeModal();
     } catch(e) { showToast(e.message || "Failed to update event.", "error"); }
@@ -389,9 +389,9 @@ function EventDetailModal({ ctx, event }) {
   async function deleteEvent() {
     setLoading(true);
     try {
-      const calId = Number(event.calendarId);
-      const remaining = events.filter(e => e.calendarId===calId && e.id!==event.id);
-      await calApi("Replace", { id: calId, ical: eventsToIcalB64(remaining) }, sessionId);
+      const calId = strId(event.calendarId);
+      const remaining = events.filter(e => strId(e.calendarId)===calId && e.id!==event.id);
+      await calApi("WriteCalendar", { calendarId: Number(calId), ical: eventsToIcalB64(remaining) }, sessionId);
       setEvents(prev => prev.filter(e => e.id !== event.id));
       showToast(`"${event.title}" deleted`); closeModal();
     } catch(e) { showToast(e.message || "Failed to delete event.", "error"); }
@@ -469,7 +469,7 @@ function EventDetailModal({ ctx, event }) {
 function CalendarEventsModal({ ctx, calendar }) {
   const { events, setModal, closeModal, sessionId, showToast } = ctx;
   const calEvts = events
-    .filter(e => e.calendarId === calendar.id && !(e.title||"").startsWith("TASK:"))
+    .filter(e => strId(e.calendarId) === strId(calendar.id) && !(e.title||"").startsWith("TASK:"))
     .sort((a,b) => new Date(a.startTime) - new Date(b.startTime));
 
   return (

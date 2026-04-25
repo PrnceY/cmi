@@ -55,9 +55,11 @@ async function apiCall(endpoint, body = {}, sessionId = null) {
   return data;
 }
 
-// Calendar API helper — used by groupCal.jsx and CstmCal.jsx
-const CAL_BASE = "/calendars.v1.CalendarService";
-const calApi   = (endpoint, body, sid) => apiCall(`${CAL_BASE}/${endpoint}`, body, sid);
+// Calendar API helpers — v2 uses separate CalendarService and CalendarWriteService
+const CAL_BASE       = "/calendars.v2.CalendarService";
+const CAL_WRITE_BASE = "/calendars.v2.CalendarWriteService";
+const calApi      = (endpoint, body, sid) => apiCall(`${CAL_BASE}/${endpoint}`, body, sid);
+const calWriteApi = (endpoint, body, sid) => apiCall(`${CAL_WRITE_BASE}/${endpoint}`, body, sid);
 
 // iCal encode/decode helpers — used by CstmCal.jsx for event API calls
 function eventsToIcal(events) {
@@ -80,14 +82,17 @@ function eventsToIcal(events) {
 function icalToEvents(icalBase64, calendarId) {
   if (!icalBase64) return [];
   let text = "";
-  try { text = atob(icalBase64); } catch(e) { text = icalBase64; }
+  try { text = decodeURIComponent(escape(atob(icalBase64))); } catch(e) {
+    try { text = atob(icalBase64); } catch(e2) { text = icalBase64; }
+  }
+  const calId = strId(calendarId);
   const events = [];
   const vevents = text.split("BEGIN:VEVENT").slice(1);
   for (const block of vevents) {
     const get = (key) => { const m = block.match(new RegExp(`${key}[^:]*:([^\r\n]*)`, "i")); return m ? icalUnescape(m[1].trim()) : ""; };
     const uid = get("UID") || uid_gen(), summary = get("SUMMARY");
     if (!summary) continue;
-    events.push({ id:uid, calendarId, title:summary, startTime:fromIcalDate(get("DTSTART")), endTime:fromIcalDate(get("DTEND")),
+    events.push({ id:uid, calendarId:calId, title:summary, startTime:fromIcalDate(get("DTSTART")), endTime:fromIcalDate(get("DTEND")),
       location:get("LOCATION"), description:get("DESCRIPTION"), isImportant:get("PRIORITY")==="1",
       createdBy:null, createdAt:fromIcalDate(get("CREATED"))||new Date().toISOString() });
   }
@@ -97,7 +102,12 @@ function toIcalDate(iso) { if(!iso) return ""; const d=new Date(iso),pad=n=>Stri
 function fromIcalDate(s) { if(!s) return new Date().toISOString(); const m=s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/); if(!m) return new Date().toISOString(); return new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7]||"Z"}`).toISOString(); }
 function icalEscape(s)       { return (s||"").replace(/\n/g,"\\n").replace(/,/g,"\\,").replace(/;/g,"\\;"); }
 function icalUnescape(s)     { return (s||"").replace(/\\n/g,"\n").replace(/\\,/g,",").replace(/\\;/g,";"); }
-function eventsToIcalB64(ev) { return btoa(unescape(encodeURIComponent(eventsToIcal(ev)))); }
+function eventsToIcalB64(ev) {
+  // iCal content must be encoded to base64 for the protobuf JSON `bytes` field.
+  // We escape non-Latin chars so btoa never throws on special characters.
+  return btoa(unescape(encodeURIComponent(eventsToIcal(ev))));
+}
+function strId(id) { return String(id); }   // normalise calendar IDs to strings everywhere
 
 // Resolve the current session to a user_id, then fetch the full profile.
 // Uses v2: GetSessionUserID → GetUser (no need to persist user_id in localStorage).
@@ -156,28 +166,54 @@ function buildUser(profile, sid) {
   };
 }
 
-// ✅ Fetch calendars + events from API, merge localStorage color prefs on top
-async function fetchAllCalendars(sid, calPrefs) {
-  const [ownedRes, subRes] = await Promise.all([calApi("GetOwned",{},sid), calApi("GetSubscribed",{},sid)]);
-  const ownedIds=ownedRes.ids||[], subIds=(subRes.ids||[]).filter(id=>!ownedIds.includes(id)), allIds=[...ownedIds,...subIds];
-  const calendars=[], events=[];
+// ── Calendar ID registry (localStorage) ─────────────────────────────────────
+// v2 has no "list my calendars" endpoint — we track IDs locally.
+function loadCalendarIds(userId) {
+  try { const raw = localStorage.getItem(`usc_${userId}_cal_ids`); return raw ? JSON.parse(raw) : { owned: [], joined: [] }; } catch(e) { return { owned: [], joined: [] }; }
+}
+function saveCalendarIds(userId, ids) {
+  try { localStorage.setItem(`usc_${userId}_cal_ids`, JSON.stringify(ids)); } catch(e) {}
+}
+function addOwnedCalendarId(userId, calId) {
+  const ids = loadCalendarIds(userId);
+  const sid = strId(calId);
+  if (!ids.owned.map(strId).includes(sid)) { ids.owned.push(sid); saveCalendarIds(userId, ids); }
+}
+function addJoinedCalendarId(userId, calId) {
+  const ids = loadCalendarIds(userId);
+  const sid = strId(calId);
+  if (!ids.joined.map(strId).includes(sid)) { ids.joined.push(sid); saveCalendarIds(userId, ids); }
+}
+function removeCalendarId(userId, calId) {
+  const sid = strId(calId);
+  const ids = loadCalendarIds(userId);
+  ids.owned  = ids.owned.filter(id => strId(id) !== sid);
+  ids.joined = ids.joined.filter(id => strId(id) !== sid);
+  saveCalendarIds(userId, ids);
+}
+
+// ✅ Fetch calendars + events from v2 API
+async function fetchAllCalendars(sid, calPrefs, userId) {
+  const { owned: ownedIds, joined: joinedIds } = loadCalendarIds(userId);
+  const allIds = [...new Set([...ownedIds, ...joinedIds].map(strId))];
+  const calendars = [], events = [];
   await Promise.all(allIds.map(async (id) => {
     try {
-      const calRes=await calApi("Get",{id},sid), prefs=calPrefs[id]||{}, isOwner=ownedIds.includes(id);
-      let codes=[];
-      if (isOwner) {
-        try {
-          const codesRes=await calApi("GetCodes",{id},sid);
-          codes=await Promise.all((codesRes.codeIds||[]).map(async cid => {
-            try { const meta=await calApi("GetCodeMetadata",{code_id:cid},sid); return {codeId:cid,code:meta.code,expiresAt:meta.expiresAt||null}; } catch(e){return null;}
-          }));
-          codes=codes.filter(Boolean);
-        } catch(e) {}
-      }
-      calendars.push({ id, name:calRes.name, description:calRes.description||"", membersOnly:calRes.members_only||false,
-        isOwner, codes, color:"#"+(calRes.color||prefs.color||pickColor(id).replace("#","")), type:prefs.type||(isOwner?"personal":"shared") });
-      const calEvents=icalToEvents(calRes.ical,id); calEvents.forEach(e=>{e.calendarId=id;}); events.push(...calEvents);
-    } catch(e) {}
+      const calRes = await calApi("GetCalendar", { calendarId: Number(id) }, sid);
+      const isOwner = strId(calRes.ownerUserId) === strId(userId);
+      const prefs   = calPrefs[id] || {};
+      const color   = "#" + (calRes.color || prefs.color || pickColor(id).replace("#", ""));
+      calendars.push({
+        id, name: calRes.name, description: calRes.description || "",
+        isOwner, codes: [], color,
+        type: prefs.type || (isOwner ? "personal" : "shared"),
+      });
+      const calEvents = icalToEvents(calRes.ical, id);
+      calEvents.forEach(e => { e.calendarId = id; });
+      events.push(...calEvents);
+    } catch(e) {
+      if (e.status === 404 || e.status === 403) removeCalendarId(userId, id);
+    }
   }));
   return { calendars, events };
 }
@@ -216,7 +252,7 @@ function App() {
     setDataLoading(true);
     try {
       const prefs = loadCalPrefs(userId);
-      const { calendars: cals, events: evts } = await fetchAllCalendars(sid, prefs);
+      const { calendars: cals, events: evts } = await fetchAllCalendars(sid, prefs, userId);
       setCalendars(cals);
       setEvents(evts);
     } catch(e) { showToast("Failed to load calendars.", "error"); }
@@ -406,6 +442,20 @@ function AuthPage({ onLogin }) {
           first_name: firstName, last_name: lastName, middle_name: middleName,
           userType: "student",
         };
+      }
+      // ✅ Create a default "My Calendar" for the new user so they can add events immediately
+      try {
+        const icalB64 = btoa("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//SchedU//EN\r\nEND:VCALENDAR");
+        const calRes = await calApi("CreateCalendar", {
+          name: "My Calendar",
+          description: "My personal calendar",
+          color: "6c63ff",
+          ical: icalB64,
+        }, sid);
+        if (calRes.calendarId) addOwnedCalendarId(finalUser.id, String(calRes.calendarId));
+      } catch(e) {
+        // Non-fatal — user can create a calendar manually from the Calendars page
+        console.warn("Default calendar creation failed:", e.message);
       }
       // ✅ isNewUser=true — triggers the onboarding tutorial in App
       onLogin(finalUser, sid, true);
@@ -759,7 +809,7 @@ function DayEventsModal({ ctx, date }) {
                 <div style={{fontSize:13,color:"var(--text3)"}}>Tap the button above to add one!</div>
               </div>
             : dayEvts.map(e => {
-                const cal = cals.find(c=>c.id===e.calendarId);
+                const cal = cals.find(c=>strId(c.id)===strId(e.calendarId));
                 const evColor = cal?.color || "var(--accent)";
                 return (
                   <div key={e.id} className="event-item"
