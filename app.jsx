@@ -290,7 +290,26 @@ function App() {
     if (isNewUser && !hasTutorialBeenSeen(user.id)) {
       setShowTutorial(true);
     }
-    setTimeout(() => loadAllData(sid, user.id), 0);
+    if (isNewUser) {
+      // For new users: create a default calendar first, then load data
+      (async () => {
+        try {
+          const icalB64 = btoa("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//SchedU//EN\r\nEND:VCALENDAR");
+          const calRes = await calApi("CreateCalendar", {
+            name: "My Calendar",
+            description: "My personal calendar",
+            color: "6c63ff",
+            ical: icalB64,
+          }, sid);
+          if (calRes && calRes.calendarId) addOwnedCalendarId(user.id, String(calRes.calendarId));
+        } catch(e) {
+          console.warn("Default calendar creation failed:", e.message);
+        }
+        loadAllData(sid, user.id);
+      })();
+    } else {
+      setTimeout(() => loadAllData(sid, user.id), 0);
+    }
   }, []);
 
   const handleLogout = useCallback(async (revokeAll=false) => {
@@ -442,20 +461,6 @@ function AuthPage({ onLogin }) {
           first_name: firstName, last_name: lastName, middle_name: middleName,
           userType: "student",
         };
-      }
-      // ✅ Create a default "My Calendar" for the new user so they can add events immediately
-      try {
-        const icalB64 = btoa("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//SchedU//EN\r\nEND:VCALENDAR");
-        const calRes = await calApi("CreateCalendar", {
-          name: "My Calendar",
-          description: "My personal calendar",
-          color: "6c63ff",
-          ical: icalB64,
-        }, sid);
-        if (calRes.calendarId) addOwnedCalendarId(finalUser.id, String(calRes.calendarId));
-      } catch(e) {
-        // Non-fatal — user can create a calendar manually from the Calendars page
-        console.warn("Default calendar creation failed:", e.message);
       }
       // ✅ isNewUser=true — triggers the onboarding tutorial in App
       onLogin(finalUser, sid, true);
