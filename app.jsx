@@ -210,7 +210,19 @@ function removeCalendarId(userId, calId) {
 }
 
 // ✅ Fetch calendars + events from v2 API
+// AFTER
 async function fetchAllCalendars(sid, calPrefs, userId) {
+  // Always fetch owned IDs from server — this fixes cross-device/cross-browser sync
+  try {
+    const res = await apiCall("/users.v2.UserProfileService/GetUserOwnedCalendars", {}, sid);
+    const serverOwned = (res.calendarIds || []).map(strId);
+    const local = loadCalendarIds(userId);
+    // Merge server IDs into local so we don't lose joined calendars
+    const merged = { owned: [...new Set([...serverOwned, ...local.owned.map(strId)])], joined: local.joined };
+    saveCalendarIds(userId, merged);
+  } catch(e) {
+    console.warn("Could not fetch owned calendars from server:", e.message);
+  }
   const { owned: ownedIds, joined: joinedIds } = loadCalendarIds(userId);
   const allIds = [...new Set([...ownedIds, ...joinedIds].map(strId))];
   const calendars = [], events = [];
