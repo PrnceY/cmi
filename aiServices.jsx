@@ -214,36 +214,91 @@ function TextToICalTool({ ctx, prefillText, onPrefillUsed }) {
             background: "var(--accent)", color: "#fff",
             fontSize: 10, fontWeight: 700, letterSpacing: 1,
             padding: "2px 10px", borderRadius: "0 0 6px 6px",
-          }}>PREVIEW</div>
+          }}>PREVIEW — EDITABLE</div>
 
           <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 15, marginBottom: 4, marginTop: 8 }}>
             {parsed.events.length} event{parsed.events.length !== 1 ? "s" : ""} found
           </div>
           <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 16 }}>
-            Review before importing to your calendar.
+            Edit any field before importing.
           </div>
 
-          {/* Event list */}
-          <div style={{ maxHeight: 260, overflowY: "auto", marginBottom: 16 }}>
+          {/* Editable event list */}
+          <div style={{ maxHeight: 320, overflowY: "auto", marginBottom: 16 }}>
             {parsed.events.map((e, i) => (
               <div key={i} style={{
-                display: "flex", gap: 10, padding: "10px 0",
-                borderBottom: "1px solid var(--border)", alignItems: "flex-start",
+                padding: "12px", marginBottom: 10,
+                background: "var(--surface2)", borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--border)",
               }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                  background: "rgba(108,99,255,0.12)", border: "1px solid rgba(108,99,255,0.2)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 14,
-                }}>📅</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{e.title}</div>
-                  <div style={{ fontSize: 11, color: "var(--text3)" }}>
-                    {fmtDate(e.startTime)} · {fmtTime(e.startTime)} – {fmtTime(e.endTime)}
+                {/* Title */}
+                <div className="form-group" style={{ marginBottom: 8 }}>
+                  <label className="form-label" style={{ fontSize: 10 }}>TITLE</label>
+                  <input className="form-input" style={{ fontSize: 13, padding: "8px 10px" }}
+                    value={e.title}
+                    onChange={ev => {
+                      const updated = [...parsed.events];
+                      updated[i] = { ...updated[i], title: ev.target.value };
+                      setParsed({ ...parsed, events: updated });
+                    }} />
+                </div>
+
+                {/* Date + Start time + End time */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                  <div>
+                    <label className="form-label" style={{ fontSize: 10 }}>DATE</label>
+                    <input className="form-input" type="date" style={{ fontSize: 12, padding: "7px 8px" }}
+                      value={e.startTime ? e.startTime.slice(0, 10) : ""}
+                      onChange={ev => {
+                        const updated = [...parsed.events];
+                        const newDate = ev.target.value;
+                        const oldStart = new Date(updated[i].startTime);
+                        const oldEnd   = new Date(updated[i].endTime);
+                        const startH = oldStart.toTimeString().slice(0, 5);
+                        const endH   = oldEnd.toTimeString().slice(0, 5);
+                        updated[i] = {
+                          ...updated[i],
+                          startTime: new Date(`${newDate}T${startH}`).toISOString(),
+                          endTime:   new Date(`${newDate}T${endH}`).toISOString(),
+                        };
+                        setParsed({ ...parsed, events: updated });
+                      }} />
                   </div>
-                  {e.location && (
-                    <div style={{ fontSize: 11, color: "var(--text3)" }}>📍 {e.location}</div>
-                  )}
+                  <div>
+                    <label className="form-label" style={{ fontSize: 10 }}>START</label>
+                    <input className="form-input" type="time" style={{ fontSize: 12, padding: "7px 8px" }}
+                      value={e.startTime ? new Date(e.startTime).toTimeString().slice(0,5) : ""}
+                      onChange={ev => {
+                        const updated = [...parsed.events];
+                        const date = updated[i].startTime.slice(0, 10);
+                        updated[i] = { ...updated[i], startTime: new Date(`${date}T${ev.target.value}`).toISOString() };
+                        setParsed({ ...parsed, events: updated });
+                      }} />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ fontSize: 10 }}>END</label>
+                    <input className="form-input" type="time" style={{ fontSize: 12, padding: "7px 8px" }}
+                      value={e.endTime ? new Date(e.endTime).toTimeString().slice(0,5) : ""}
+                      onChange={ev => {
+                        const updated = [...parsed.events];
+                        const date = updated[i].endTime.slice(0, 10);
+                        updated[i] = { ...updated[i], endTime: new Date(`${date}T${ev.target.value}`).toISOString() };
+                        setParsed({ ...parsed, events: updated });
+                      }} />
+                  </div>
+                </div>
+
+                {/* Location */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: 10 }}>LOCATION <span style={{ color: "var(--text3)", fontWeight: 400, textTransform: "none" }}>(optional)</span></label>
+                  <input className="form-input" style={{ fontSize: 13, padding: "8px 10px" }}
+                    placeholder="Add location…"
+                    value={e.location || ""}
+                    onChange={ev => {
+                      const updated = [...parsed.events];
+                      updated[i] = { ...updated[i], location: ev.target.value };
+                      setParsed({ ...parsed, events: updated });
+                    }} />
                 </div>
               </div>
             ))}
@@ -258,7 +313,7 @@ function TextToICalTool({ ctx, prefillText, onPrefillUsed }) {
           </div>
 
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setParsed(null); }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setParsed(null)}>
               ← Discard
             </button>
             <button className="btn btn-primary btn-sm" onClick={importEvents} disabled={importing || !targetCal}

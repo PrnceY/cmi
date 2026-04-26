@@ -122,7 +122,9 @@ function CalendarPage({ ctx }) {
                     <div key={e.id} className="cal-event"
                       style={{ borderLeft:`2px solid ${evColor}`, background:`${evColor}28`, color:evColor }}
                       onClick={ev => { ev.stopPropagation(); setModal({ type:"event-detail", data:e }); }}>
-                      <span style={{ opacity: 0.75, fontWeight: 500, marginRight: 3 }}>{fmtTime(e.startTime)} ·</span>
+                      {!(e.title || "").startsWith("TASK:") && (
+                        <span style={{ opacity: 0.75, fontWeight: 500, marginRight: 3 }}>{fmtTime(e.startTime)} ·</span>
+                      )}
                       {e.isImportant ? "⭐ " : ""}{(e.title || "").replace("TASK:", "TASK: ")}
                     </div>
                   );
