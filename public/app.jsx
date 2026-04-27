@@ -162,6 +162,26 @@ function fmtTime(iso) { return new Date(iso).toLocaleTimeString([],{hour:"2-digi
 function fmtDate(iso) { return new Date(iso).toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}); }
 function sameDay(a,b) { const da=new Date(a),db=new Date(b); return da.getFullYear()===db.getFullYear()&&da.getMonth()===db.getMonth()&&da.getDate()===db.getDate(); }
 function avatarColor(name) { const c=["#6c63ff","#34d399","#fbbf24","#f472b6","#60a5fa","#fb923c"]; let h=0; for(const ch of (name||"?")) h=(h+ch.charCodeAt(0))%c.length; return c[h]; }
+// Persistent avatar color — stored per user so it never changes on reload
+function loadAvatarColor(userId, name) {
+  const key = `usc_${userId}_avatar_color`;
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored) return stored;
+    const color = avatarColor(String(userId || name || "?"));
+    localStorage.setItem(key, color);
+    return color;
+  } catch(e) { return avatarColor(String(userId || name || "?")); }
+}
+// Get initials from first and last name
+function nameInitials(firstName, lastName) {
+  const f = (firstName||"").trim();
+  const l = (lastName||"").trim();
+  if (f && l) return (f[0]+l[0]).toUpperCase();
+  if (f) return f.slice(0,2).toUpperCase();
+  if (l) return l.slice(0,2).toUpperCase();
+  return "?";
+}
 const PALETTE = ["#6c63ff","#34d399","#f472b6","#60a5fa","#fb923c","#f87171","#2dd4bf"];
 function pickColor(id) { return PALETTE[Math.abs(id||0) % PALETTE.length]; }
 
@@ -171,11 +191,20 @@ function buildUser(profile, sid) {
   const userId = p.userId;
   const email = p.email || "";
   const fullName = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(" ");
+  // Persist email so it survives page reloads (profile may not always return it)
+  if (userId && email) {
+    try { localStorage.setItem(`usc_${userId}_email`, email); } catch(e) {}
+  }
+  // Fall back to stored email if profile didn't return one
+  let resolvedEmail = email;
+  if (!resolvedEmail && userId) {
+    try { resolvedEmail = localStorage.getItem(`usc_${userId}_email`) || ""; } catch(e) {}
+  }
   return {
     id: userId,           // int32 userId resolved via GetSessionUserID
     sessionId: sid,       // session string kept separately
-    email,
-    name: fullName || email,
+    email: resolvedEmail,
+    name: fullName || resolvedEmail,
     first_name:  p.firstName  || "",
     last_name:   p.lastName   || "",
     middle_name: p.middleName || "",
@@ -395,7 +424,6 @@ function App() {
           {page==="tasks"          && <TaskTrackerPage   ctx={ctx} />}
           {page==="ai"             && <AIServicesPage    ctx={ctx} />}
           {page==="settings"       && <SettingsPage      ctx={ctx} />}
-          {page==="about"          && <AboutPage         ctx={ctx} />}
         </div>
         <BottomNav page={page} setPage={navigateTo} />
       </div>
@@ -462,7 +490,11 @@ function AuthPage({ onLogin }) {
       // LoginUserResponse has no user_id — resolve it via GetSessionUserID → GetUser
       const profile = await fetchUserProfile(sid);
       const user = buildUser(profile, sid);
-      const finalUser = user.email ? user : { ...user, email, name: email, userType: "student" };
+      // If profile API didn't return email, inject the one the user typed and persist it
+      if (!user.email && email) {
+        try { localStorage.setItem(`usc_${user.id}_email`, email); } catch(e) {}
+      }
+      const finalUser = user.email ? user : { ...user, email, name: user.name || email, userType: "student" };
       // Existing login — isNewUser=false (default), tutorial will NOT fire
       onLogin(finalUser, sid, false);
     } catch(e) { setError(e.message || "Login failed. Check your credentials."); }
@@ -479,11 +511,22 @@ function AuthPage({ onLogin }) {
       const sid = r.sessionToken;
       const uid = r.userId;
       if (!sid) throw new Error("Registration failed.");
+      // Persist email early so buildUser fallback can find it
+      if (uid && email) {
+        try { localStorage.setItem(`usc_${uid}_email`, email); } catch(e) {}
+      }
       // Fetch full profile; fall back to form values if profile fetch fails
       let finalUser;
       try {
         const profile = await fetchUserProfile(sid);
         finalUser = buildUser(profile, sid);
+        // If profile API still didn't return email, inject the registration email
+        if (!finalUser.email && email) {
+          finalUser = { ...finalUser, email };
+          if (finalUser.id) {
+            try { localStorage.setItem(`usc_${finalUser.id}_email`, email); } catch(e) {}
+          }
+        }
       } catch(e) {
         finalUser = {
           id: uid, sessionId: sid, email,
@@ -498,29 +541,147 @@ function AuthPage({ onLogin }) {
     finally { setLoading(false); }
   }
 
+  const team = [
+    { name:"Frankent M. Maratas",       role:"Product Owner", color:"#6c63ff" },
+    { name:"Franc Noel O. Aguilar",     role:"Developer",     color:"#2dd4bf" },
+    { name:"Kris Andrie Ortega",        role:"Developer",     color:"#60a5fa" },
+    { name:"Vinz Ralei R. Ouano",       role:"Developer",     color:"#34d399" },
+    { name:"Edrian Josh M. Retiza",     role:"Developer",     color:"#f472b6" },
+    { name:"Prince Emmanuel M. Yu",     role:"Scrum Master",  color:"#fb923c" },
+  ];
+
   return (
-    <div className="auth-wrap">
-      <div className="auth-bg" />
-      <div className="auth-card">
-        <div className="auth-logo"><span className="logo-sched">Sched</span><span className="logo-u">U</span></div>
-        <div className="auth-sub">Your unified scheduling platform</div>
-        <div className="auth-tabs">
-          <button className={`auth-tab${activeTab==="login"?" active":""}`}    onClick={()=>{setActiveTab("login");setError("");}}>Sign In</button>
-          <button className={`auth-tab${activeTab==="register"?" active":""}`} onClick={()=>{setActiveTab("register");setError("");}}>Register</button>
-        </div>
-        {error && <div className="error-msg">{error}</div>}
-        {activeTab==="register" && (<>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <div className="form-group"><label className="form-label">First Name *</label><input className="form-input" value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Juan" /></div>
-            <div className="form-group"><label className="form-label">Last Name *</label><input className="form-input" value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="dela Cruz" /></div>
+    <div className="auth-split-wrap">
+
+      {/* ── LEFT: Hero / About panel ── */}
+      <div className="auth-hero-panel">
+        {/* Ambient orbs */}
+        <div className="auth-orb auth-orb-1" />
+        <div className="auth-orb auth-orb-2" />
+        <div className="auth-orb auth-orb-3" />
+
+        <div className="auth-hero-inner">
+          {/* Logo */}
+          <div className="auth-hero-logo-block">
+            <div className="auth-hero-logo">
+              <span className="logo-sched">Sched</span><span className="logo-u">U</span>
+            </div>
+            <p className="auth-hero-tagline">Your unified scheduling platform</p>
           </div>
-          <div className="form-group"><label className="form-label">Middle Name <span style={{color:"var(--text3)",fontWeight:400}}>(optional)</span></label><input className="form-input" value={middleName} onChange={e=>setMiddleName(e.target.value)} placeholder="Santos" /></div>
-        </>)}
-        <div className="form-group"><label className="form-label">Email Address</label><input className="form-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" /></div>
-        <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&(activeTab==="login"?handleLogin():handleRegister())} /></div>
-        {activeTab==="login"
-          ? <button className="btn btn-primary" onClick={handleLogin} disabled={loading}>{loading?"Signing in…":"Sign In →"}</button>
-          : <button className="btn btn-primary" onClick={handleRegister} disabled={loading}>{loading?"Creating account…":"Create Account →"}</button>}
+
+          {/* Feature pills */}
+          <div className="auth-hero-pills">
+            {[["📅","Calendar Sharing","#6c63ff"],["✅","Task Tracking","#34d399"],["👥","Group Calendars","#60a5fa"],["✨","AI Tools","#2dd4bf"]].map(([ic,lbl,c])=>(
+              <span key={lbl} className="auth-pill" style={{"--pill-color":c}}>{ic} {lbl}</span>
+            ))}
+          </div>
+
+          {/* Divider */}
+          <div className="auth-hero-divider" />
+
+          {/* What is it */}
+          <div className="auth-hero-section">
+            <div className="auth-hero-section-title">What is SchedU?</div>
+            <p className="auth-hero-desc">
+              A web-based scheduling and calendar management platform for students and organizations.
+              Create calendars, share events via access codes, track academic tasks — all in one place.
+            </p>
+          </div>
+
+          {/* Team */}
+          <div className="auth-hero-section">
+            <div className="auth-hero-section-title">Meet the Team</div>
+            <div className="auth-team-grid">
+              {team.map((m,i)=>(
+                <div key={i} className="auth-team-card">
+                  <div className="auth-team-avatar" style={{background:m.color}}>
+                    {m.name.split(" ").map(w=>w[0]).join("").slice(0,2)}
+                  </div>
+                  <div className="auth-team-info">
+                    <div className="auth-team-name">{m.name}</div>
+                    <div className="auth-team-role" style={{color:m.color}}>{m.role}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Stack */}
+          <div className="auth-hero-section">
+            <div className="auth-hero-section-title">Built With</div>
+            <div className="auth-stack-row">
+              {[["Go","#2dd4bf"],["ConnectRPC","#a78bfa"],["React","#60a5fa"],["MariaDB","#4db55b"],["JavaScript","#34d399"]].map(([n,c])=>(
+                <span key={n} className="auth-stack-chip" style={{"--chip-color":c}}>{n}</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="auth-hero-footer">University of San Carlos · DCISM · {new Date().getFullYear()}</div>
+        </div>
+      </div>
+
+      {/* ── RIGHT: Login form ── */}
+      <div className="auth-form-side">
+        <div className="auth-form-box">
+          {/* Mobile-only logo */}
+          <div className="auth-mobile-logo">
+            <span className="logo-sched">Sched</span><span className="logo-u">U</span>
+          </div>
+
+          <div className="auth-form-heading">
+            {activeTab === "login" ? "Welcome back" : "Create account"}
+          </div>
+          <div className="auth-form-sub">
+            {activeTab === "login" ? "Sign in to your SchedU account" : "Join SchedU and stay organized"}
+          </div>
+
+          {/* Tab switcher */}
+          <div className="auth-switcher">
+            <button className={`auth-switch-btn${activeTab==="login"?" active":""}`} onClick={()=>{setActiveTab("login");setError("");}}>Sign In</button>
+            <button className={`auth-switch-btn${activeTab==="register"?" active":""}`} onClick={()=>{setActiveTab("register");setError("");}}>Register</button>
+          </div>
+
+          {error && <div className="error-msg">{error}</div>}
+
+          {activeTab==="register" && (
+            <div className="auth-name-row">
+              <div className="form-group">
+                <label className="form-label">First Name *</label>
+                <input className="form-input" value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Juan" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Last Name *</label>
+                <input className="form-input" value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="dela Cruz" />
+              </div>
+            </div>
+          )}
+          {activeTab==="register" && (
+            <div className="form-group">
+              <label className="form-label">Middle Name <span style={{color:"var(--text3)",fontWeight:400}}>(optional)</span></label>
+              <input className="form-input" value={middleName} onChange={e=>setMiddleName(e.target.value)} placeholder="Santos" />
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Email Address</label>
+            <input className="form-input auth-input-lg" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@usc.edu.ph" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Password</label>
+            <input className="form-input auth-input-lg" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&(activeTab==="login"?handleLogin():handleRegister())} />
+          </div>
+
+          <button className="btn auth-submit-btn" onClick={activeTab==="login"?handleLogin:handleRegister} disabled={loading}>
+            {loading ? (activeTab==="login"?"Signing in…":"Creating account…") : (activeTab==="login"?"Sign In →":"Create Account →")}
+          </button>
+
+          <div className="auth-switch-hint">
+            {activeTab==="login"
+              ? <><span style={{color:"var(--text3)"}}>No account?</span> <button className="auth-inline-link" onClick={()=>{setActiveTab("register");setError("");}}>Register here</button></>
+              : <><span style={{color:"var(--text3)"}}>Already have one?</span> <button className="auth-inline-link" onClick={()=>{setActiveTab("login");setError("");}}>Sign in</button></>
+            }
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -529,7 +690,8 @@ function AuthPage({ onLogin }) {
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 function Sidebar({ page, setPage, ctx, isOpen }) {
   const { currentUser, handleLogout, myCalendars } = ctx;
-  const ac = avatarColor(currentUser.name);
+  const ac = loadAvatarColor(currentUser.id, currentUser.name);
+  const initials = nameInitials(currentUser.first_name, currentUser.last_name);
   const navItems = [
     {id:"dashboard",    icon:"⊞",  label:"Dashboard"},
     {id:"calendar",     icon:"📅", label:"Calendar View"},
@@ -538,13 +700,12 @@ function Sidebar({ page, setPage, ctx, isOpen }) {
     {id:"tasks",        icon:"✅", label:"Task Tracker"},
     {id:"ai",           icon:"✨", label:"AI Tools"},
     {id:"settings",     icon:"⚙️", label:"Settings"},
-    {id:"about",        icon:"ℹ️",  label:"About Us"},
   ];
   return (
     <div className={`sidebar${isOpen?" open":""}`}>
       <div className="sidebar-logo"><span className="logo-sched">Sched</span><span className="logo-u">U</span></div>
       <div className="sidebar-user">
-        <div className="user-avatar" style={{background:ac}}>{currentUser.name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</div>
+        <div className="user-avatar" style={{background:ac}}>{initials}</div>
         <div className="user-info">
           <div className="user-name">{[currentUser.first_name, currentUser.last_name].filter(Boolean).join(" ") || currentUser.name}</div>
           <div style={{fontSize:11,color:"var(--text3)",marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUser.email}</div>
@@ -576,7 +737,7 @@ function Sidebar({ page, setPage, ctx, isOpen }) {
 
 // ─── TOPBAR ───────────────────────────────────────────────────────────────────
 function Topbar({ page, ctx, setPage, onMenuClick }) {
-  const titles = {dashboard:"Dashboard",calendar:"Calendar View",events:"Events List",calendars:"Manage Calendars",tasks:"Task Tracker",ai:"AI Tools",settings:"Settings"};
+  const titles = {dashboard:"Dashboard",calendar:"Calendar View",events:"Events List",calendars:"Manage Calendars",tasks:"Task Tracker",ai:"AI Tools",settings:"Settings",about:"About SchedU"};
   const { dataLoading, refreshCalendars, theme, toggleTheme } = ctx;
   return (
     <div className="topbar">
@@ -759,47 +920,49 @@ function SettingsPage({ ctx }) {
     finally { setDeleteLoading(false); }
   }
 
-  const ac=avatarColor(currentUser.name);
+  const ac = loadAvatarColor(currentUser.id, currentUser.name);
+  const initials = nameInitials(currentUser.first_name, currentUser.last_name);
+
   return (
-    <div style={{maxWidth:560}}>
-      <div className="card mb-4">
-        <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:18}}>Profile</div>
-        <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:24}}>
-          <div className="user-avatar" style={{background:ac,width:56,height:56,fontSize:20}}>{[currentUser.first_name,currentUser.last_name].filter(Boolean).map(w=>w[0]).join("").slice(0,2).toUpperCase()||currentUser.name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</div>
-          <div>
-            <div style={{fontWeight:700,fontSize:16}}>{[currentUser.first_name,currentUser.last_name].filter(Boolean).join(" ")||currentUser.name}</div>
-            <div style={{fontSize:13,color:"var(--text3)"}}>{currentUser.email}</div>
-            <div className="user-badge" style={{marginTop:4}}>🎓 Student</div>
+    <div style={{maxWidth:620}}>
+          <div className="card mb-4">
+            <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:18}}>Profile</div>
+            <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:24}}>
+              <div className="user-avatar" style={{background:ac,width:56,height:56,fontSize:20}}>{initials}</div>
+              <div>
+                <div style={{fontWeight:700,fontSize:16}}>{[currentUser.first_name,currentUser.last_name].filter(Boolean).join(" ")||currentUser.name}</div>
+                <div style={{fontSize:13,color:"var(--text3)"}}>{currentUser.email}</div>
+                <div className="user-badge" style={{marginTop:4}}>🎓 Student</div>
+              </div>
+            </div>
+            {profileError&&<div className="error-msg">{profileError}</div>}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div className="form-group"><label className="form-label">First Name</label><input className="form-input" value={firstName} onChange={e=>setFirstName(e.target.value)} /></div>
+              <div className="form-group"><label className="form-label">Last Name</label><input className="form-input" value={lastName} onChange={e=>setLastName(e.target.value)} /></div>
+            </div>
+            <div className="form-group"><label className="form-label">Middle Name</label><input className="form-input" value={middleName} onChange={e=>setMiddleName(e.target.value)} /></div>
+            <button className="btn btn-primary btn-sm" onClick={saveProfile} disabled={profileLoading}>{profileLoading?"Saving…":"Save Profile"}</button>
           </div>
-        </div>
-        {profileError&&<div className="error-msg">{profileError}</div>}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <div className="form-group"><label className="form-label">First Name</label><input className="form-input" value={firstName} onChange={e=>setFirstName(e.target.value)} /></div>
-          <div className="form-group"><label className="form-label">Last Name</label><input className="form-input" value={lastName} onChange={e=>setLastName(e.target.value)} /></div>
-        </div>
-        <div className="form-group"><label className="form-label">Middle Name</label><input className="form-input" value={middleName} onChange={e=>setMiddleName(e.target.value)} /></div>
-        <button className="btn btn-primary btn-sm" onClick={saveProfile} disabled={profileLoading}>{profileLoading?"Saving…":"Save Profile"}</button>
-      </div>
-      <div className="card mb-4">
-        <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:14}}>Update Login Info</div>
-        {loginError&&<div className="error-msg">{loginError}</div>}
-        <div className="form-group"><label className="form-label">New Email <span style={{color:"var(--text3)",fontWeight:400}}>(optional)</span></label><input className="form-input" type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="Leave blank to keep current" /></div>
-        <div className="form-group"><label className="form-label">New Password <span style={{color:"var(--text3)",fontWeight:400}}>(optional)</span></label><input className="form-input" type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="Leave blank to keep current" /></div>
-        <button className="btn btn-primary btn-sm" onClick={saveLoginInfo} disabled={loginLoading}>{loginLoading?"Saving…":"Update Login Info"}</button>
-      </div>
-      <div className="card mb-4">
-        <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:14}}>Account Info</div>
-        <div className="info-row"><div className="info-label">Email</div><div className="info-val">{currentUser.email}</div></div>
-        <div className="info-row"><div className="info-label">User Type</div><div className="info-val">Student</div></div>
-      </div>
-      <div className="card">
-        <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:14,color:"var(--red)"}}>Danger Zone</div>
-        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-          <button className="btn btn-ghost btn-sm" onClick={()=>handleLogout()}>Sign Out</button>
-          <button className="btn btn-ghost btn-sm" onClick={()=>handleLogout(true)}>Sign Out Everywhere</button>
-          <button className="btn btn-danger btn-sm" onClick={deleteAccount} disabled={deleteLoading}>{deleteLoading?"Deleting…":"Delete Account"}</button>
-        </div>
-      </div>
+          <div className="card mb-4">
+            <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:14}}>Update Login Info</div>
+            {loginError&&<div className="error-msg">{loginError}</div>}
+            <div className="form-group"><label className="form-label">New Email <span style={{color:"var(--text3)",fontWeight:400}}>(optional)</span></label><input className="form-input" type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="Leave blank to keep current" /></div>
+            <div className="form-group"><label className="form-label">New Password <span style={{color:"var(--text3)",fontWeight:400}}>(optional)</span></label><input className="form-input" type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="Leave blank to keep current" /></div>
+            <button className="btn btn-primary btn-sm" onClick={saveLoginInfo} disabled={loginLoading}>{loginLoading?"Saving…":"Update Login Info"}</button>
+          </div>
+          <div className="card mb-4">
+            <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:14}}>Account Info</div>
+            <div className="info-row"><div className="info-label">Email</div><div className="info-val">{currentUser.email}</div></div>
+            <div className="info-row"><div className="info-label">User Type</div><div className="info-val">Student</div></div>
+          </div>
+          <div className="card">
+            <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:16,marginBottom:14,color:"var(--red)"}}>Danger Zone</div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              <button className="btn btn-ghost btn-sm" onClick={()=>handleLogout()}>Sign Out</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>handleLogout(true)}>Sign Out Everywhere</button>
+              <button className="btn btn-danger btn-sm" onClick={deleteAccount} disabled={deleteLoading}>{deleteLoading?"Deleting…":"Delete Account"}</button>
+            </div>
+          </div>
     </div>
   );
 }
@@ -892,149 +1055,178 @@ const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
 // ─── ABOUT PAGE ───────────────────────────────────────────────────────────────
 function AboutPage({ ctx }) {
+  return <AboutContent />;
+}
+
+function AboutContent() {
   const team = [
-    { initials:"?", name:"Your Name", role:"Full-Stack Developer",  bio:"Responsible for backend architecture, API design, and database management." },
-    { initials:"?", name:"Your Name", role:"Frontend Developer",    bio:"Designed and built the user interface, components, and user experience flows." },
-    { initials:"?", name:"Your Name", role:"Frontend Developer",    bio:"Implemented calendar views, event management, and responsive layouts." },
-    { initials:"?", name:"Your Name", role:"Backend Developer",     bio:"Worked on authentication, access control, and calendar sharing logic." },
-    { initials:"?", name:"Your Name", role:"UI/UX Designer",        bio:"Created wireframes, design system, and ensured visual consistency throughout." },
-    { initials:"?", name:"Your Name", role:"Project Manager",       bio:"Coordinated tasks, managed timelines, and ensured smooth team collaboration." },
+    { name:"Frankent M. Maratas",   role:"Product Owner", bio:"Project vision, requirements, and stakeholder communication." },
+    { name:"Franc Noel O. Aguilar", role:"Developer",     bio:"Frontend development, UI components, and user experience flows." },
+    { name:"Kris Andrie Ortega",    role:"Developer",     bio:"Calendar views, event management, and responsive layouts." },
+    { name:"Vinz Ralei R. Ouano",   role:"Developer",     bio:"Backend architecture, API design, and database management." },
+    { name:"Edrian Josh M. Retiza", role:"Developer",     bio:"Authentication, access control, and calendar sharing logic." },
+    { name:"Prince Emmanuel M. Yu", role:"Scrum Master",  bio:"Sprint planning, team coordination, and agile process management." },
   ];
 
+  const roleColors = ["#6c63ff","#2dd4bf","#60a5fa","#34d399","#f472b6","#fb923c"];
+
   const stack = [
-    { name:"Go",          desc:"Backend / gRPC API",       color:"var(--teal)" },
-    { name:"ConnectRPC",  desc:"API protocol layer",        color:"var(--accent2)" },
-    { name:"React",       desc:"Frontend framework",        color:"var(--blue)" },
-    { name:"SQLite",      desc:"Database",                  color:"var(--yellow)" },
-    { name:"Nginx",       desc:"Reverse proxy / hosting",   color:"var(--green)" },
+    { name:"Go",         icon:"🔵", desc:"Backend & gRPC API" },
+    { name:"ConnectRPC", icon:"⚡", desc:"API protocol layer" },
+    { name:"React",      icon:"⚛️", desc:"Frontend framework" },
+    { name:"MongoDB",    icon:"🍃", desc:"Database" },
+    { name:"Nginx",      icon:"🌐", desc:"Reverse proxy" },
+  ];
+
+  const features = [
+    { icon:"📅", label:"Calendar Sharing" },
+    { icon:"✅", label:"Task Tracking" },
+    { icon:"👥", label:"Group Calendars" },
+    { icon:"✨", label:"AI Tools" },
   ];
 
   return (
-    <div style={{ maxWidth:780, margin:"0 auto" }}>
+    <div style={{ maxWidth:860, margin:"0 auto", paddingBottom:40 }}>
 
-      {/* ── Hero ── */}
-      <div className="card" style={{ marginBottom:20, textAlign:"center", padding:"48px 32px",
-        background:"linear-gradient(135deg, rgba(108,99,255,0.12) 0%, rgba(45,212,191,0.08) 100%)",
-        border:"1px solid rgba(108,99,255,0.25)", position:"relative", overflow:"hidden" }}>
-        <div style={{ position:"absolute", top:-40, right:-40, width:180, height:180,
-          borderRadius:"50%", background:"rgba(108,99,255,0.07)", pointerEvents:"none" }} />
-        <div style={{ position:"absolute", bottom:-30, left:-30, width:120, height:120,
-          borderRadius:"50%", background:"rgba(45,212,191,0.06)", pointerEvents:"none" }} />
-        <div style={{ fontFamily:"var(--font-head)", fontSize:38, fontWeight:800, marginBottom:10,
-          background:"linear-gradient(90deg, var(--accent2), var(--teal))",
-          WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text" }}>
-          CountMeIn
-        </div>
-        <div style={{ fontSize:16, color:"var(--text2)", maxWidth:480, margin:"0 auto", lineHeight:1.7 }}>
-          A collaborative calendar platform built to help students and teams organize
-          schedules, share events, and stay in sync — all in one place.
-        </div>
-        <div style={{ marginTop:20, display:"flex", justifyContent:"center", gap:10, flexWrap:"wrap" }}>
-          <span className="chip chip-accent">📅 Calendar Sharing</span>
-          <span className="chip chip-green">✅ Task Tracking</span>
-          <span className="chip chip-blue">👥 Group Calendars</span>
-          <span className="chip" style={{background:"rgba(45,212,191,0.15)",color:"var(--teal)"}}>✨ AI Tools</span>
+      {/* ── Hero Banner ── */}
+      <div style={{
+        position:"relative", borderRadius:20, overflow:"hidden", marginBottom:32,
+        background:"linear-gradient(135deg, #0f0f1a 0%, #1a1230 50%, #0d1f1f 100%)",
+        border:"1px solid rgba(108,99,255,0.2)", padding:"56px 48px",
+      }}>
+        {/* Decorative orbs */}
+        <div style={{ position:"absolute", top:-60, right:-60, width:260, height:260, borderRadius:"50%",
+          background:"radial-gradient(circle, rgba(108,99,255,0.18) 0%, transparent 70%)", pointerEvents:"none" }} />
+        <div style={{ position:"absolute", bottom:-40, left:-40, width:200, height:200, borderRadius:"50%",
+          background:"radial-gradient(circle, rgba(45,212,191,0.14) 0%, transparent 70%)", pointerEvents:"none" }} />
+        <div style={{ position:"absolute", top:"40%", left:"55%", width:120, height:120, borderRadius:"50%",
+          background:"radial-gradient(circle, rgba(244,114,182,0.08) 0%, transparent 70%)", pointerEvents:"none" }} />
+
+        <div style={{ position:"relative", zIndex:1 }}>
+          {/* Eyebrow */}
+          <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(108,99,255,0.15)",
+            border:"1px solid rgba(108,99,255,0.3)", borderRadius:20, padding:"4px 14px",
+            fontSize:11, fontWeight:700, color:"var(--accent2)", letterSpacing:1.5,
+            textTransform:"uppercase", marginBottom:20 }}>
+            🎓 DCISM Capstone Project
+          </div>
+
+          {/* App name */}
+          <div style={{ display:"flex", alignItems:"baseline", gap:2, marginBottom:16 }}>
+            <span style={{ fontFamily:"var(--font-head)", fontSize:52, fontWeight:900, lineHeight:1,
+              background:"linear-gradient(90deg, #3b9fe8 0%, #2ec4f0 100%)",
+              WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text" }}>
+              Sched
+            </span>
+            <span style={{ fontFamily:"var(--font-head)", fontSize:52, fontWeight:900, lineHeight:1, fontStyle:"italic",
+              background:"linear-gradient(135deg, #4cc16e 0%, #22d97a 100%)",
+              WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text" }}>
+              U
+            </span>
+          </div>
+
+          <div style={{ fontSize:16, color:"rgba(240,240,248,0.65)", maxWidth:460, lineHeight:1.75, marginBottom:28 }}>
+            Your unified scheduling platform — built to help USC students organize schedules,
+            share events, and stay in sync with the people that matter.
+          </div>
+
+          {/* Feature pills */}
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            {features.map((f,i)=>(
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:7,
+                background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)",
+                borderRadius:10, padding:"8px 16px", fontSize:13, fontWeight:600, color:"rgba(240,240,248,0.8)" }}>
+                <span>{f.icon}</span> {f.label}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* ── What is CountMeIn ── */}
-      <div className="card" style={{ marginBottom:20 }}>
-        <div style={{ fontFamily:"var(--font-head)", fontSize:18, fontWeight:700, marginBottom:14,
-          display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:20 }}>🎯</span> What is CountMeIn?
+      {/* ── Two-col: Mission + Stack ── */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
+
+        {/* Mission */}
+        <div style={{ background:"var(--surface)", border:"1px solid var(--border)",
+          borderRadius:16, padding:"28px 28px" }}>
+          <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, textTransform:"uppercase",
+            color:"var(--accent2)", marginBottom:14 }}>What is SchedU?</div>
+          <div style={{ fontSize:14, color:"var(--text2)", lineHeight:1.85 }}>
+            A web-based scheduling app for students and orgs. Create personal and group calendars,
+            share them with access codes, track academic tasks, and view everything in one place.
+          </div>
+          <div style={{ marginTop:18, paddingTop:18, borderTop:"1px solid var(--border)",
+            fontSize:12, color:"var(--text3)", lineHeight:1.7 }}>
+            Whether you're coordinating a study group, managing org events, or keeping track of
+            deadlines — SchedU keeps you organized and connected.
+          </div>
         </div>
-        <div style={{ color:"var(--text2)", fontSize:14, lineHeight:1.8, marginBottom:12 }}>
-          CountMeIn is a web-based scheduling and calendar management application designed
-          for students and organizations. It lets you create personal and group calendars,
-          share them using access codes, track academic tasks, and view everything on one
-          unified calendar.
-        </div>
-        <div style={{ color:"var(--text2)", fontSize:14, lineHeight:1.8 }}>
-          Whether you're coordinating a study group, managing org events, or just keeping
-          track of deadlines — CountMeIn gives you the tools to stay organized and
-          connected with the people that matter.
+
+        {/* Tech Stack */}
+        <div style={{ background:"var(--surface)", border:"1px solid var(--border)",
+          borderRadius:16, padding:"28px 28px" }}>
+          <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, textTransform:"uppercase",
+            color:"var(--teal)", marginBottom:14 }}>Built With</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {stack.map((s,i)=>(
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:12,
+                padding:"9px 12px", borderRadius:10, background:"var(--surface2)",
+                border:"1px solid var(--border)" }}>
+                <span style={{ fontSize:18, width:28, textAlign:"center" }}>{s.icon}</span>
+                <div>
+                  <div style={{ fontSize:13, fontWeight:700, color:"var(--text)", lineHeight:1.2 }}>{s.name}</div>
+                  <div style={{ fontSize:11, color:"var(--text3)", marginTop:1 }}>{s.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* ── Meet the Team ── */}
-      <div className="card" style={{ marginBottom:20 }}>
-        <div style={{ fontFamily:"var(--font-head)", fontSize:18, fontWeight:700, marginBottom:16,
-          display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:20 }}>👩‍💻</span> Meet the Team
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(210px, 1fr))", gap:12 }}>
-          {team.map((m, i) => {
-            const colors = ["var(--accent)","var(--teal)","var(--blue)","var(--green)","var(--pink)","var(--orange)"];
-            const bg = colors[i % colors.length];
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)",
+        borderRadius:16, padding:"28px 28px" }}>
+        <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, textTransform:"uppercase",
+          color:"var(--pink)", marginBottom:20 }}>Meet the Team</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(230px, 1fr))", gap:12 }}>
+          {team.map((m,i)=>{
+            const col = roleColors[i % roleColors.length];
+            const initials = m.name.split(" ").filter(Boolean).map(w=>w[0]).join("").slice(0,2).toUpperCase() || "?";
             return (
-              <div key={i} style={{ background:"var(--surface2)", border:"1px solid var(--border)",
-                borderRadius:"var(--radius)", padding:"20px 16px", textAlign:"center",
-                transition:"var(--transition)" }}
-                onMouseEnter={e=>e.currentTarget.style.borderColor="var(--border2)"}
-                onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
-                {/* Avatar placeholder */}
-                <div style={{ width:72, height:72, borderRadius:"50%", margin:"0 auto 14px",
-                  background:"var(--surface3)", border:`2px dashed ${bg}`, position:"relative",
-                  display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column",
-                  overflow:"hidden" }}>
-                  {/* Silhouette SVG */}
-                  <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg"
-                    style={{ position:"absolute", inset:0 }}>
-                    <circle cx="36" cy="28" r="14" fill="currentColor" style={{ color: bg, opacity:0.25 }} />
-                    <ellipse cx="36" cy="62" rx="22" ry="14" fill="currentColor" style={{ color: bg, opacity:0.18 }} />
-                  </svg>
+              <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:14,
+                padding:"16px", borderRadius:12, background:"var(--surface2)",
+                border:"1px solid var(--border)", transition:"var(--transition)" }}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=col;e.currentTarget.style.background="var(--surface3)";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--surface2)";}}>
+                {/* Avatar */}
+                <div style={{ width:44, height:44, borderRadius:12, background:col+"22",
+                  border:`1.5px solid ${col}44`, display:"flex", alignItems:"center", justifyContent:"center",
+                  flexShrink:0, fontFamily:"var(--font-head)", fontWeight:800, fontSize:15, color:col }}>
+                  {initials}
                 </div>
-                <div style={{ fontFamily:"var(--font-head)", fontSize:14, fontWeight:700,
-                  color:"var(--text2)", marginBottom:3, fontStyle:"italic", opacity:0.6 }}>
-                  {m.name}
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"var(--text)", marginBottom:2,
+                    whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{m.name}</div>
+                  <div style={{ fontSize:10, fontWeight:700, color:col, textTransform:"uppercase",
+                    letterSpacing:0.8, marginBottom:5 }}>{m.role}</div>
+                  <div style={{ fontSize:11, color:"var(--text3)", lineHeight:1.6 }}>{m.bio}</div>
                 </div>
-                <div style={{ fontSize:11, color:bg, fontWeight:600, marginBottom:8,
-                  textTransform:"uppercase", letterSpacing:"0.5px" }}>
-                  {m.role}
-                </div>
-                <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.6 }}>{m.bio}</div>
               </div>
             );
           })}
         </div>
-      </div>
 
-      {/* ── Tech Stack ── */}
-      <div className="card" style={{ marginBottom:20 }}>
-        <div style={{ fontFamily:"var(--font-head)", fontSize:18, fontWeight:700, marginBottom:16,
-          display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:20 }}>🛠️</span> Built With
-        </div>
-        <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
-          {stack.map((s, i) => (
-            <div key={i} style={{ display:"flex", alignItems:"center", gap:10,
-              background:"var(--surface2)", border:"1px solid var(--border)",
-              borderRadius:"var(--radius-sm)", padding:"10px 14px", flex:"1", minWidth:130 }}>
-              <div style={{ width:8, height:8, borderRadius:"50%", background:s.color, flexShrink:0 }} />
-              <div>
-                <div style={{ fontSize:13, fontWeight:700, color:"var(--text)" }}>{s.name}</div>
-                <div style={{ fontSize:11, color:"var(--text3)" }}>{s.desc}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Built for ── */}
-      <div className="card" style={{ marginBottom:20, textAlign:"center", padding:"28px 24px",
-        borderColor:"rgba(52,211,153,0.2)", background:"rgba(52,211,153,0.04)" }}>
-        <div style={{ fontSize:28, marginBottom:10 }}>🎓</div>
-        <div style={{ fontFamily:"var(--font-head)", fontSize:16, fontWeight:700,
-          color:"var(--text)", marginBottom:6 }}>
-          Built for Students
-        </div>
-        <div style={{ fontSize:13, color:"var(--text2)", lineHeight:1.7, maxWidth:440, margin:"0 auto" }}>
-          CountMeIn was developed as a capstone project by students of the
-          Department of Computer and Information Sciences Mathematics (DCISM).
-          It is designed to serve the scheduling needs of the USC community.
-        </div>
-        <div style={{ marginTop:14, fontSize:12, color:"var(--text3)" }}>
-          University of San Carlos · DCISM · {new Date().getFullYear()}
+        {/* Footer credit */}
+        <div style={{ marginTop:24, paddingTop:20, borderTop:"1px solid var(--border)",
+          display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
+          <div style={{ fontSize:12, color:"var(--text3)" }}>
+            University of San Carlos · DCISM · {new Date().getFullYear()}
+          </div>
+          <div style={{ display:"flex", gap:6 }}>
+            {["📅","✅","👥","✨"].map((e,i)=>(
+              <span key={i} style={{ fontSize:16, opacity:0.4 }}>{e}</span>
+            ))}
+          </div>
         </div>
       </div>
 
