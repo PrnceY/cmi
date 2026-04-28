@@ -1,9 +1,8 @@
 deploy:
-	@printf "ssh -p $(SSH_PORT) \"%s\" '%s'\n" \
-		"$(SSH_USER)@$(SSH_HOST)" \
-		'git -C ~/countmein.dcism.org pull'
-	@sshpass -p "$(SSH_PASSWORD)" ssh -p "$(SSH_PORT)" \
-		"$(SSH_USER)@$(SSH_HOST)" \
-		'git -C ~/countmein.dcism.org pull'
+	@echo "rsync -avz --delete ./public $(DEPLOY_PUBLIC_PATH)"
+	@sshpass -p "$(SSH_PASSWORD)" \
+		rsync -avz --delete -e "ssh -p $(SSH_PORT)" --chmod=u+w  \
+		--checksum ./public \
+		"$(SSH_USER)@$(SSH_HOST):/$(DEPLOY_PUBLIC_PATH)"
 
 .PHONY: deploy

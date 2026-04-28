@@ -66,8 +66,8 @@ function decodeDesc(raw) {
   if (idx === -1) return { description: noStatus.trim(), checklist: [], status };
   const description = noStatus.slice(0, idx).trim();
   const checkLines  = noStatus.slice(idx + sep.length).trim().split("\n").filter(Boolean);
-  const checklist   = checkLines.map(line => ({
-    id:      uid_gen(),
+  const checklist   = checkLines.map((line, i) => ({
+    id:      "cl_" + i,   // stable index-based ID — never changes between renders
     label:   line.replace(/^\[.\]\s*/, ""),
     checked: line.startsWith("[x]"),
   }));
@@ -80,7 +80,12 @@ function eventToTask(ev) {
   const title    = rawTitle.startsWith(TASK_PREFIX) ? rawTitle.slice(TASK_PREFIX.length) : rawTitle;
   const { description, checklist, status: storedStatus } = decodeDesc(ev.description);
   const { subject, type, priority } = decodeTaskLocation(ev.location);
-  const dueDate = ev.startTime ? ev.startTime.slice(0, 10) : "";
+  const dueDate   = ev.startTime ? ev.startTime.slice(0, 10) : "";
+  const dueTime   = ev.startTime ? ev.startTime.slice(11, 16) : "";
+  const startDate = ev.startTime ? ev.startTime.slice(0, 10) : "";
+  const startTime = ev.startTime ? ev.startTime.slice(11, 16) : "";
+  const endDate   = ev.endTime   ? ev.endTime.slice(0, 10)   : "";
+  const endTime   = ev.endTime   ? ev.endTime.slice(11, 16)  : "";
 
   let status = storedStatus || "not-started";
   if (!storedStatus && checklist.length > 0) {
@@ -88,14 +93,19 @@ function eventToTask(ev) {
     status = done === 0 ? "not-started" : done === checklist.length ? "done" : "in-progress";
   }
 
-  return { id:ev.id, calendarId:ev.calendarId, title, subject, type, priority, description, checklist, dueDate, status, createdAt:ev.createdAt||new Date().toISOString() };
+  return { id:ev.id, calendarId:ev.calendarId, title, subject, type, priority, description, checklist, dueDate, dueTime, startDate, startTime, endDate, endTime, status, createdAt:ev.createdAt||new Date().toISOString() };
 }
 
 function taskToEvent(task, calendarId) {
-  const descFull = encodeDesc(task.description, task.checklist, task.status);
-  const dueDate  = task.dueDate || new Date().toISOString().slice(0, 10);
-  const startISO = new Date(`${dueDate}T12:00:00`).toISOString();
-  const endISO   = new Date(`${dueDate}T13:00:00`).toISOString();
+  const descFull  = encodeDesc(task.description, task.checklist, task.status);
+  const dueDate   = task.dueDate || new Date().toISOString().slice(0, 10);
+  const startTime = task.startTime || "08:00";
+  const endTime   = task.endTime || (() => {
+    const [h, m] = startTime.split(":").map(Number);
+    return String(h + 1).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+  })();
+  const startISO = `${dueDate}T${startTime}:00`;
+  const endISO   = `${dueDate}T${endTime}:00`;
   return {
     id:         task.id || uid_gen(),
     calendarId,
@@ -165,13 +175,15 @@ function TaskTrackerPage({ ctx }) {
   const [typeFilter,   setTypeFilter]   = React.useState("all");
 
   const [showForm,    setShowForm]    = React.useState(false);
-  const [form,        setForm]        = React.useState({ title:"", subject:"", type:"Assignment", priority:"Medium", description:"", dueDate:"", checklist:[] });
+  const [form,        setForm]        = React.useState({ title:"", subject:"", type:"Assignment", priority:"Medium", description:"", dueDate:"", dueTime:"", startDate:"", startTime:"", endDate:"", endTime:"", checklist:[] });
   const [newCheckItem,setNewCheckItem]= React.useState("");
   const [editId,      setEditId]      = React.useState(null);
   const [formLoading, setFormLoading] = React.useState(false);
   const [formError,   setFormError]   = React.useState("");
   const [collapsed,   setCollapsed]   = React.useState({});
   const [migrating,   setMigrating]   = React.useState(false);
+  const checkInputRef = React.useRef(null);
+  const checkScrollRefs = React.useRef({});
 
   const STATUS_COLOR = { "not-started":"var(--text3)", "in-progress":"var(--blue)", "done":"var(--green)" };
   const STATUS_LABEL = { "not-started":"Not Started", "in-progress":"In Progress", "done":"Completed" };
@@ -235,11 +247,11 @@ function TaskTrackerPage({ ctx }) {
 
   // ── Form helpers ──
   function openNew() {
-    setForm({ title:"", subject:"", type:"Assignment", priority:"Medium", description:"", dueDate:"", checklist:[] });
+    setForm({ title:"", subject:"", type:"Assignment", priority:"Medium", description:"", dueDate:"", dueTime:"", startDate:"", startTime:"", endDate:"", endTime:"", checklist:[] });
     setNewCheckItem(""); setEditId(null); setFormError(""); setShowForm(true);
   }
   function openEdit(task) {
-    setForm({ title:task.title, subject:task.subject||"", type:task.type||"Assignment", priority:task.priority||"Medium", description:task.description||"", dueDate:task.dueDate||"", checklist:(task.checklist||[]).map(i=>({...i,id:i.id||uid_gen()})) });
+    setForm({ title:task.title, subject:task.subject||"", type:task.type||"Assignment", priority:task.priority||"Medium", description:task.description||"", dueDate:task.dueDate||"", dueTime:task.dueTime||"", startDate:task.startDate||"", startTime:task.startTime||"", endDate:task.endDate||"", endTime:task.endTime||"", checklist:(task.checklist||[]).map(i=>({...i,id:i.id||uid_gen()})) });
     setNewCheckItem(""); setEditId(task.id); setFormError(""); setShowForm(true);
   }
   function addCheck() {
@@ -247,6 +259,7 @@ function TaskTrackerPage({ ctx }) {
     if (!t) return;
     setForm(f => ({ ...f, checklist:[...f.checklist, { id:uid_gen(), label:t, checked:false }] }));
     setNewCheckItem("");
+    setTimeout(() => checkInputRef.current?.focus(), 0);
   }
 
   // ── API CRUD ──
@@ -272,13 +285,23 @@ function TaskTrackerPage({ ctx }) {
   async function toggleCheck(taskId, checkId) {
     const cal  = getTaskCal(); if (!cal) return;
     const task = tasks.find(t => t.id === taskId); if (!task) return;
-    const newCL     = task.checklist.map(i => i.id===checkId ? {...i,checked:!i.checked} : i);
+    // Save both card scroll and page scroll before any state update
+    const scrollEl    = checkScrollRefs.current[taskId];
+    const savedScroll = scrollEl ? scrollEl.scrollTop : 0;
+    const savedPageY  = window.scrollY;
+    const newCL     = task.checklist.map(i => i.id===checkId ? {...i, checked:!i.checked} : i);
     const newStatus = computeStatus(newCL, task.status);
     const newEvent  = taskToEvent({...task, checklist:newCL, status:newStatus}, cal.id);
     try {
       const calEvts = events.filter(e=>e.calendarId===cal.id).map(e=>e.id===taskId?newEvent:e);
-      await calApi("WriteCalendar", { calendarId: Number(cal.id), ical: eventsToIcalB64(calEvts) }, sessionId);      setEvents(prev=>prev.map(e=>e.id===taskId?newEvent:e));
-    } catch(e) { showToast("Failed to update.","error"); }
+      await calApi("WriteCalendar", { calendarId: Number(cal.id), ical: eventsToIcalB64(calEvts) }, sessionId);
+      setEvents(prev=>prev.map(e=>e.id===taskId?newEvent:e));
+      // Restore both scroll positions after re-render
+      requestAnimationFrame(() => {
+        if (checkScrollRefs.current[taskId]) checkScrollRefs.current[taskId].scrollTop = savedScroll;
+        window.scrollTo({ top: savedPageY, behavior: "instant" });
+      });
+    } catch(e) { showToast("Failed to update.", "error"); }
   }
 
   async function setManualStatus(taskId, status) {
@@ -290,6 +313,18 @@ function TaskTrackerPage({ ctx }) {
       await calApi("WriteCalendar", { calendarId: Number(cal.id), ical: eventsToIcalB64(calEvts) }, sessionId);
       setEvents(prev=>prev.map(e=>e.id===taskId?newEvent:e));
     } catch(e) { showToast("Failed to update.","error"); }
+  }
+
+  async function duplicateTask(task) {
+    const cal = getTaskCal(); if (!cal) return;
+    try {
+      const newTask  = { ...task, id:uid_gen(), title:task.title + " (Copy)", createdAt:new Date().toISOString() };
+      const newEvent = taskToEvent(newTask, cal.id);
+      const calEvts  = [...events.filter(e=>e.calendarId===cal.id), newEvent];
+      await calApi("WriteCalendar", { calendarId: Number(cal.id), ical: eventsToIcalB64(calEvts) }, sessionId);
+      setEvents(prev=>[...prev, newEvent]);
+      showToast("Task duplicated!");
+    } catch(e) { showToast("Failed to duplicate.","error"); }
   }
 
   async function deleteTask(taskId) {
@@ -309,71 +344,101 @@ function TaskTrackerPage({ ctx }) {
     const pct = checkTotal ? Math.round((checkDone/checkTotal)*100) : null;
     const isOverdue = task.dueDate && task.status !== "done" && new Date(task.dueDate+"T00:00:00") < new Date();
 
+    function fmtTaskDate(dateStr) {
+      if (!dateStr) return null;
+      return new Date(dateStr+"T00:00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+    }
+    function fmtTaskTime(timeStr) {
+      if (!timeStr) return null;
+      return new Date("1970-01-01T"+timeStr+":00").toLocaleTimeString([],{hour:"numeric",minute:"2-digit",hour12:true});
+    }
+
+    const hasStart = task.startDate || task.startTime;
+    const hasEnd   = task.endDate   || task.endTime;
+    const hasDue   = task.dueDate;
+
     return (
-      <div className="task-card" style={{ marginBottom:10 }}>
-        {/* Top row */}
-        <div style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:8 }}>
-          {/* Type icon */}
-          <span style={{ fontSize:16, lineHeight:1, marginTop:2, flexShrink:0 }}>{TYPE_ICON[task.type]||"📌"}</span>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontWeight:700, fontSize:14, marginBottom:3, lineHeight:1.3 }}>{task.title}</div>
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-              {task.subject && (
-                <span className="task-chip task-chip-subject">{task.subject}</span>
-              )}
-              <span className="task-chip" style={{ color:PRIORITY_COLOR[task.priority]||"var(--text3)", borderColor:PRIORITY_COLOR[task.priority]||"var(--border)" }}>{task.priority}</span>
-              <span className="task-chip">{task.type}</span>
-            </div>
-          </div>
-          {/* Actions */}
-          <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
-            {checkTotal === 0 ? (
-              <select value={task.status} onChange={e=>setManualStatus(task.id,e.target.value)}
-                style={{ fontSize:10, background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:4, padding:"2px 5px", color:STATUS_COLOR[task.status], fontWeight:600, cursor:"pointer" }}>
-                <option value="not-started">Not Started</option>
-                <option value="in-progress">In Progress</option>
-                <option value="done">Completed</option>
-              </select>
-            ) : (
-              <span style={{ fontSize:10, padding:"2px 7px", borderRadius:4, background:"var(--surface2)", color:STATUS_COLOR[task.status], fontWeight:600, border:"1px solid var(--border)" }}>
-                {STATUS_LABEL[task.status]}
-              </span>
-            )}
+      <div className="task-card" style={{ marginBottom:0, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
+
+        {/* Top row: icon + title + actions */}
+        <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
+          <span style={{ fontSize:18, lineHeight:1, marginTop:2, flexShrink:0 }}>{TYPE_ICON[task.type]||"📌"}</span>
+          <div style={{ fontWeight:700, fontSize:14, lineHeight:1.4, flex:1, minWidth:0, wordBreak:"break-word" }}>{task.title}</div>
+          <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0, marginLeft:4 }}>
+            <button title="Duplicate" className="task-btn-edit" onClick={()=>duplicateTask(task)} style={{ fontSize:11 }}>⧉</button>
             <button className="task-btn-edit" onClick={()=>openEdit(task)}>Edit</button>
-            <button className="task-btn-del"  onClick={()=>deleteTask(task.id)}>✕</button>
+            <button className="task-btn-del" onClick={()=>deleteTask(task.id)}>✕</button>
           </div>
         </div>
 
-        {/* Due date */}
-        {task.dueDate && (
-          <div style={{ fontSize:11, color:isOverdue?"var(--red)":"var(--text3)", marginBottom:6, fontWeight:isOverdue?700:400 }}>
-            {isOverdue?"⚠️ Overdue — ":"📅 Due "}
-            {new Date(task.dueDate+"T00:00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
+        {/* Chips row */}
+        <div style={{ display:"flex", gap:5, flexWrap:"wrap", alignItems:"center" }}>
+          {task.subject && <span className="task-chip task-chip-subject">{task.subject}</span>}
+          <span className="task-chip" style={{ color:PRIORITY_COLOR[task.priority]||"var(--text3)", borderColor:PRIORITY_COLOR[task.priority]||"var(--border)" }}>{task.priority}</span>
+          <span className="task-chip">{task.type}</span>
+          {checkTotal === 0 ? (
+            <select value={task.status} onChange={e=>setManualStatus(task.id,e.target.value)}
+              style={{ fontSize:10, background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:4, padding:"2px 6px", color:STATUS_COLOR[task.status], fontWeight:600, cursor:"pointer", marginLeft:"auto" }}>
+              <option value="not-started">Not Started</option>
+              <option value="in-progress">In Progress</option>
+              <option value="done">Completed</option>
+            </select>
+          ) : (
+            <span style={{ fontSize:10, padding:"2px 8px", borderRadius:4, background:"var(--surface2)", color:STATUS_COLOR[task.status], fontWeight:600, border:"1px solid var(--border)", marginLeft:"auto" }}>
+              {STATUS_LABEL[task.status]}
+            </span>
+          )}
+        </div>
+
+        {/* Dates */}
+        {(task.dueDate || task.startTime || task.endTime) && (
+          <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+            {task.dueDate && (
+              <div style={{ fontSize:11, color:isOverdue?"var(--red)":"var(--text3)", fontWeight:isOverdue?700:400 }}>
+                {isOverdue ? "⚠️ Overdue — " : "📅 Due: "}
+                {fmtTaskDate(task.dueDate)}
+              </div>
+            )}
+            {task.startTime && (
+              <div style={{ fontSize:11, color:"var(--text3)" }}>
+                🟢 Start: {fmtTaskTime(task.startTime)}
+              </div>
+            )}
+            {task.endTime && (
+              <div style={{ fontSize:11, color:"var(--text3)" }}>
+                🔴 End: {fmtTaskTime(task.endTime)}
+              </div>
+            )}
           </div>
         )}
 
         {/* Description */}
         {task.description && (
-          <div className="task-desc">{task.description}</div>
+          <div className="task-desc" style={{ fontSize:12, color:"var(--text2)", lineHeight:1.5, padding:"6px 10px", background:"var(--surface2)", borderRadius:6, border:"1px solid var(--border)" }}>
+            {task.description}
+          </div>
         )}
 
         {/* Checklist */}
         {checkTotal > 0 && (
-          <div style={{ marginTop:8 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
-              <span style={{ fontSize:11, color:"var(--text3)", fontWeight:700, letterSpacing:.5 }}>CHECKLIST</span>
-              <span style={{ fontSize:11, color:"var(--text2)" }}>{checkDone}/{checkTotal}</span>
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+              <span style={{ fontSize:11, color:"var(--text3)", fontWeight:700, letterSpacing:.5, textTransform:"uppercase" }}>Checklist</span>
+              <span style={{ fontSize:11, color:"var(--text2)", fontWeight:600 }}>{checkDone}/{checkTotal} · <span style={{ color:pct===100?"var(--green)":pct>0?"var(--accent)":"var(--text3)" }}>{pct}%</span></span>
             </div>
             <div style={{ height:3, background:"var(--surface3)", borderRadius:2, marginBottom:6, overflow:"hidden" }}>
               <div style={{ height:"100%", background:pct===100?"var(--green)":"var(--accent)", borderRadius:2, width:`${pct}%`, transition:"width .3s" }} />
             </div>
-            {task.checklist.map(item => (
-              <div key={item.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 0", borderBottom:"1px solid var(--border)" }}>
-                <input type="checkbox" checked={item.checked} onChange={()=>toggleCheck(task.id,item.id)}
-                  style={{ accentColor:"var(--accent)", width:14, height:14, flexShrink:0, cursor:"pointer" }} />
-                <span style={{ fontSize:12, textDecoration:item.checked?"line-through":"none", color:item.checked?"var(--text3)":"var(--text)", flex:1 }}>{item.label}</span>
-              </div>
-            ))}
+            <div style={{ maxHeight:130, overflowY:"auto", border:"1px solid var(--border)", borderRadius:6 }}
+              ref={el => { if (el) checkScrollRefs.current[task.id] = el; }}>
+              {task.checklist.map(item => (
+                <div key={item.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 10px", borderBottom:"1px solid var(--border)" }}>
+                  <input type="checkbox" checked={item.checked} onChange={()=>toggleCheck(task.id,item.id)}
+                    style={{ accentColor:"var(--accent)", width:14, height:14, flexShrink:0, cursor:"pointer" }} />
+                  <span style={{ fontSize:12, textDecoration:item.checked?"line-through":"none", color:item.checked?"var(--text3)":"var(--text)", flex:1, lineHeight:1.4 }}>{item.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -405,7 +470,9 @@ function TaskTrackerPage({ ctx }) {
             <div style={{ height:3, background:"var(--surface3)", borderRadius:2, marginBottom:12, overflow:"hidden" }}>
               <div style={{ height:"100%", background:pct===100?"var(--green)":"var(--accent)", width:`${pct}%`, borderRadius:2 }} />
             </div>
-            {subjTasks.map(task => <TaskCard key={task.id} task={task} />)}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:12, marginBottom:12 }}>
+              {subjTasks.map(task => <TaskCard key={task.id} task={task} />)}
+            </div>
           </>}
         </div>
       );
@@ -477,13 +544,12 @@ function TaskTrackerPage({ ctx }) {
           <option value="all">All Types</option>
           {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
-        <div style={{ flex:1 }} />
-        <button className="btn btn-primary" onClick={openNew} disabled={!cal} style={{ width:"100%" }}>+ Add Task</button>
+        <button className="btn btn-primary btn-sm" onClick={openNew} disabled={!cal} style={{ marginLeft:"auto", whiteSpace:"nowrap", width:"auto", marginTop:0 }}>+ Add Task</button>
       </div>
 
       {/* Task form */}
       {showForm && (
-        <div className="card" style={{ marginBottom:20, border:"1.5px solid var(--accent)" }}>
+        <div className="card" style={{ marginBottom:20, border:"1.5px solid var(--accent)", maxWidth:640, margin:"0 auto 20px" }}>
           <div style={{ fontFamily:"var(--font-head)", fontWeight:700, fontSize:15, marginBottom:16 }}>
             {editId ? "Edit Task" : "New Task"}
           </div>
@@ -525,29 +591,44 @@ function TaskTrackerPage({ ctx }) {
               placeholder="Instructions, reminders, page numbers, links…" />
           </div>
 
-          {/* Due Date */}
-          <div className="form-group">
-            <label className="form-label">Due Date <span style={{ color:"var(--text3)", fontWeight:400 }}>(optional)</span></label>
-            <input className="form-input" type="date" value={form.dueDate}
-              onChange={e=>setForm(f=>({...f,dueDate:e.target.value}))} />
+          {/* Due Date / Start Time / End Time */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+            <div className="form-group">
+              <label className="form-label">Due Date <span style={{ color:"var(--text3)", fontWeight:400 }}>(optional)</span></label>
+              <input className="form-input" type="date" value={form.dueDate}
+                onChange={e=>setForm(f=>({...f,dueDate:e.target.value}))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Start Time <span style={{ color:"var(--text3)", fontWeight:400 }}>(optional)</span></label>
+              <input className="form-input" type="time" value={form.startTime}
+                onChange={e=>setForm(f=>({...f,startTime:e.target.value}))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">End Time <span style={{ color:"var(--text3)", fontWeight:400 }}>(optional)</span></label>
+              <input className="form-input" type="time" value={form.endTime}
+                onChange={e=>setForm(f=>({...f,endTime:e.target.value}))} />
+            </div>
           </div>
 
           {/* Checklist */}
           <div className="form-group">
             <label className="form-label">Checklist / Steps</label>
-            {form.checklist.map(item => (
-              <div key={item.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid var(--border)" }}>
-                <input type="checkbox" checked={item.checked} onChange={()=>setForm(f=>({...f,checklist:f.checklist.map(i=>i.id===item.id?{...i,checked:!i.checked}:i)}))}
-                  style={{ accentColor:"var(--accent)", width:16, height:16, flexShrink:0 }} />
-                <span style={{ flex:1, fontSize:13, textDecoration:item.checked?"line-through":"none", color:item.checked?"var(--text3)":"var(--text)" }}>{item.label}</span>
-                <button className="btn-icon btn-sm" style={{ fontSize:12 }} onClick={()=>setForm(f=>({...f,checklist:f.checklist.filter(i=>i.id!==item.id)}))}>✕</button>
-              </div>
-            ))}
-            <div style={{ display:"flex", gap:8, marginTop:8 }}>
+            <div style={{ display:"flex", gap:8, marginBottom:8 }}>
               <input className="form-input" style={{ flex:1 }} value={newCheckItem}
+                ref={checkInputRef}
                 onChange={e=>setNewCheckItem(e.target.value)} placeholder="Add a step or subtask…"
                 onKeyDown={e=>e.key==="Enter"&&addCheck()} />
               <button className="btn btn-ghost btn-sm" onClick={addCheck}>Add</button>
+            </div>
+            <div style={{ maxHeight:160, overflowY:"auto", border:form.checklist.length>0?"1px solid var(--border)":"none", borderRadius:6 }}>
+              {form.checklist.map(item => (
+                <div key={item.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 8px", borderBottom:"1px solid var(--border)" }}>
+                  <input type="checkbox" checked={item.checked} onChange={()=>setForm(f=>({...f,checklist:f.checklist.map(i=>i.id===item.id?{...i,checked:!i.checked}:i)}))}
+                    style={{ accentColor:"var(--accent)", width:16, height:16, flexShrink:0 }} />
+                  <span style={{ flex:1, fontSize:13, textDecoration:item.checked?"line-through":"none", color:item.checked?"var(--text3)":"var(--text)" }}>{item.label}</span>
+                  <button className="btn-icon btn-sm" style={{ fontSize:12 }} onClick={()=>setForm(f=>({...f,checklist:f.checklist.filter(i=>i.id!==item.id)}))}>✕</button>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -565,7 +646,9 @@ function TaskTrackerPage({ ctx }) {
       {viewMode === "all" && (
         filtered.length === 0
           ? <EmptyState />
-          : filtered.map(task => <TaskCard key={task.id} task={task} />)
+          : <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:12 }}>
+              {filtered.map(task => <TaskCard key={task.id} task={task} />)}
+            </div>
       )}
     </div>
   );

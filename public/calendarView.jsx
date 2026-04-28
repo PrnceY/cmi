@@ -118,14 +118,34 @@ function CalendarPage({ ctx }) {
                   const isTask = (e.title || "").startsWith("TASK:");
                   const cal = cals.find(c => c.id === e.calendarId);
                   const evColor = isTask ? "var(--yellow)" : (cal?.color || "var(--accent)");
+                  // Compute task progress for display in calendar
+                  let taskPct = null;
+                  if (isTask && e.description) {
+                    const sep = "---CHECKLIST---";
+                    const statusStrip = e.description.replace(/\nSTATUS:(done|in-progress|not-started)/, "");
+                    const idx = statusStrip.indexOf(sep);
+                    if (idx !== -1) {
+                      const lines = statusStrip.slice(idx + sep.length).trim().split("\n").filter(Boolean);
+                      if (lines.length > 0) {
+                        const done = lines.filter(l => l.startsWith("[x]")).length;
+                        taskPct = Math.round((done / lines.length) * 100);
+                      }
+                    }
+                  }
+                  const taskTitle = (e.title || "").replace(/^TASK:/, "");
                   return (
                     <div key={e.id} className="cal-event"
-                      style={{ borderLeft:`2px solid ${evColor}`, background:`${evColor}28`, color:evColor }}
+                      style={{ borderLeft:`2px solid ${evColor}`, background:`${evColor}28`, color:evColor, display:"flex", alignItems:"center", gap:3 }}
                       onClick={ev => { ev.stopPropagation(); setModal({ type:"event-detail", data:e }); }}>
-                      {!(e.title || "").startsWith("TASK:") && (
-                        <span style={{ opacity: 0.75, fontWeight: 500, marginRight: 3 }}>{fmtTime(e.startTime)} ·</span>
+                      {!isTask && (
+                        <span style={{ opacity: 0.75, fontWeight: 500, marginRight: 2, flexShrink:0 }}>{fmtTime(e.startTime)} ·</span>
                       )}
-                      {e.isImportant ? "⭐ " : ""}{(e.title || "").replace("TASK:", "TASK: ")}
+                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>
+                        {e.isImportant ? "⭐ " : ""}{isTask ? taskTitle : e.title}
+                      </span>
+                      {taskPct !== null && (
+                        <span style={{ fontSize:9, fontWeight:700, flexShrink:0, opacity:0.85 }}>{taskPct}%</span>
+                      )}
                     </div>
                   );
                 })}
@@ -386,6 +406,39 @@ function EventDetailModal({ ctx, event }) {
   });
   const [loading, setLoading] = React.useState(false);
 
+  // Detect task events and decode metadata for clean display
+  const isTaskEvent = (event.title || "").startsWith("TASK:");
+  let taskMeta = null;
+  if (isTaskEvent) {
+    const loc = event.location || "";
+    const subjM = loc.match(/SUBJ:([^|]*)/);
+    const typeM = loc.match(/TYPE:([^|]*)/);
+    const prioM = loc.match(/PRIO:(.*)/);
+    const desc = event.description || "";
+    const noStatus = desc.replace(/\nSTATUS:(done|in-progress|not-started)/, "");
+    const sep = "---CHECKLIST---";
+    const idx = noStatus.indexOf(sep);
+    let checklist = [];
+    if (idx !== -1) {
+      checklist = noStatus.slice(idx + sep.length).trim().split("\n").filter(Boolean).map(line => ({
+        label: line.replace(/^\[.\]\s*/, ""),
+        checked: line.startsWith("[x]"),
+      }));
+    }
+    const statusMatch = desc.match(/\nSTATUS:(done|in-progress|not-started)/);
+    const checkDone = checklist.filter(i => i.checked).length;
+    taskMeta = {
+      title: (event.title || "").replace(/^TASK:/, ""),
+      subject: subjM ? subjM[1].trim() : "",
+      type: typeM ? typeM[1].trim() : "",
+      priority: prioM ? prioM[1].trim() : "",
+      status: statusMatch ? statusMatch[1] : "not-started",
+      checklist,
+      checkDone,
+      pct: checklist.length ? Math.round((checkDone / checklist.length) * 100) : null,
+    };
+  }
+
   // Sub-feature: Edit Event — replace iCal on API
   async function saveEdit() {
     setLoading(true);
@@ -418,15 +471,41 @@ function EventDetailModal({ ctx, event }) {
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div style={{ display:"flex", alignItems:"center", gap:10, flex:1 }}>
-            <div style={{ width:10, height:10, borderRadius:"50%", background:cal?.color||"var(--accent)" }} />
-            <div className="modal-title">{event.title}</div>
-            {event.isImportant && <span className="chip chip-yellow" style={{ fontSize:10 }}>⭐</span>}
+            <div style={{ width:10, height:10, borderRadius:"50%", background:isTaskEvent?"var(--yellow)":(cal?.color||"var(--accent)") }} />
+            <div className="modal-title">{isTaskEvent ? (taskMeta?.title || event.title) : event.title}</div>
+            {isTaskEvent && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:4, background:"rgba(251,191,36,0.12)", color:"var(--yellow)", fontWeight:700, border:"1px solid rgba(251,191,36,0.25)" }}>Task</span>}
+            {!isTaskEvent && event.isImportant && <span className="chip chip-yellow" style={{ fontSize:10 }}>⭐</span>}
           </div>
           <button className="close-btn" onClick={closeModal}>✕</button>
         </div>
         <div className="modal-body">
           {/* Sub-feature: Event Detail Fields — read view */}
           {!editing ? (<>
+            {isTaskEvent && taskMeta ? (<>
+              {/* Clean task detail view */}
+              <div className="info-row"><div className="info-label">Calendar</div><div className="info-val">{cal?.name||"—"}</div></div>
+              {taskMeta.subject && <div className="info-row"><div className="info-label">Subject</div><div className="info-val">{taskMeta.subject}</div></div>}
+              <div className="info-row"><div className="info-label">Type</div><div className="info-val">{taskMeta.type}</div></div>
+              <div className="info-row"><div className="info-label">Priority</div><div className="info-val">{taskMeta.priority}</div></div>
+              <div className="info-row"><div className="info-label">Due</div><div className="info-val">{fmtDate(event.startTime)} · {fmtTime(event.startTime)}</div></div>
+              <div className="info-row"><div className="info-label">Status</div><div className="info-val" style={{ textTransform:"capitalize", color:taskMeta.status==="done"?"var(--green)":taskMeta.status==="in-progress"?"var(--blue)":"var(--text3)", fontWeight:600 }}>{taskMeta.status.replace("-"," ")}</div></div>
+              {taskMeta.checklist.length > 0 && (
+                <div style={{ marginTop:12 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"var(--text3)", letterSpacing:.5, marginBottom:6, textTransform:"uppercase" }}>Checklist ({taskMeta.checkDone}/{taskMeta.checklist.length})</div>
+                  <div style={{ height:4, background:"var(--surface3)", borderRadius:2, marginBottom:8, overflow:"hidden" }}>
+                    <div style={{ height:"100%", width:`${taskMeta.pct}%`, background:taskMeta.pct===100?"var(--green)":"var(--accent)", borderRadius:2, transition:"width .3s" }} />
+                  </div>
+                  <div style={{ maxHeight:160, overflowY:"auto", overscrollBehavior:"contain" }}>
+                    {taskMeta.checklist.map((item, idx) => (
+                      <div key={idx} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border)" }}>
+                        <span style={{ fontSize:13 }}>{item.checked ? "☑" : "☐"}</span>
+                        <span style={{ fontSize:13, textDecoration:item.checked?"line-through":"none", color:item.checked?"var(--text3)":"var(--text)" }}>{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>) : (<>
             <div className="info-row"><div className="info-label">Calendar</div><div className="info-val">{cal?.name||"—"}</div></div>
             <div className="info-row"><div className="info-label">Date</div><div className="info-val">{fmtDate(event.startTime)}</div></div>
             <div className="info-row"><div className="info-label">Time</div><div className="info-val">{fmtTime(event.startTime)} – {fmtTime(event.endTime)}</div></div>
@@ -439,6 +518,7 @@ function EventDetailModal({ ctx, event }) {
                 </div>
               </div>
             )}
+            </>)}
           </>) : (<>
             {/* Edit form */}
             <div className="form-group">
