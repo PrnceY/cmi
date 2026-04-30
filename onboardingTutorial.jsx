@@ -29,6 +29,8 @@
 //    "nav-calendar"        — Calendar View sidebar nav item
 //    "nav-events"          — My Events sidebar nav item
 //    "nav-tasks"           — Task Tracker sidebar nav item
+//    "nav-organizations"   — Organizations sidebar nav item
+//    "nav-ai"              — AI Tools sidebar nav item
 //    "topbar-refresh"      — Refresh icon button in the topbar
 //
 //  LOAD ORDER — add to index.html AFTER monthProgress.jsx,
@@ -138,21 +140,27 @@ const TUTORIAL_STEPS = [
     position: "left",
   },
   {
-    title:    "My Calendars — Start Here",
-    body:     "Create your first calendar before anything else. Every event and task you create needs to live inside a calendar you own.",
-    target:   "[data-tutorial='nav-calendars']",
-    position: "right",
-  },
-  {
     title:    "Calendar View",
     body:     "See all your events on a monthly grid. Tap any day to view or add events. Use the colour pills to filter by calendar.",
     target:   "[data-tutorial='nav-calendar']",
     position: "right",
   },
   {
-    title:    "My Events",
+    title:    "Events List",
     body:     "A flat, searchable list of every event across all your calendars — upcoming and past, filterable by importance.",
     target:   "[data-tutorial='nav-events']",
+    position: "right",
+  },
+  {
+    title:    "Manage Calendars — Start Here",
+    body:     "Create your first calendar before anything else. Every event and task you create needs to live inside a calendar you own.",
+    target:   "[data-tutorial='nav-calendars']",
+    position: "right",
+  },
+  {
+    title:    "Organizations",
+    body:     "Join or create organizations — like a department or club. Owners can push shared calendars to all members so everyone stays in sync automatically.",
+    target:   "[data-tutorial='nav-organizations']",
     position: "right",
   },
   {
@@ -162,8 +170,14 @@ const TUTORIAL_STEPS = [
     position: "right",
   },
   {
+    title:    "AI Tools ✨",
+    body:     "Three AI-powered tools in one place: describe events in plain text and let AI create them for you, analyze your calendar for insights, or extract text from a photo of a schedule using OCR.",
+    target:   "[data-tutorial='nav-ai']",
+    position: "right",
+  },
+  {
     title:    "You're all set! 🚀",
-    body:     "Head to My Calendars first and create a calendar. Once that's done, events and tasks will be ready to go.",
+    body:     "Start by heading to Manage Calendars and creating your first calendar — everything else builds from there.",
     target:   null,
     position: "center",
   },
