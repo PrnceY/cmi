@@ -87,7 +87,13 @@ function eventToTask(ev) {
   const startDate = ev.startTime ? ev.startTime.slice(0, 10) : "";
   const startTime = ev.startTime ? ev.startTime.slice(11, 16) : "";
   const endDate   = ev.endTime   ? ev.endTime.slice(0, 10)   : "";
-  const endTime   = ev.endTime   ? ev.endTime.slice(11, 16)  : "";
+  const rawEndTime = ev.endTime  ? ev.endTime.slice(11, 16)  : "";
+  // Detect auto-midnight: endTime 00:00 on the day after dueDate = was never set by user
+  const isAutoMidnight = rawEndTime === "00:00" && dueDate && endDate && (() => {
+    const next = new Date(dueDate+"T00:00:00"); next.setDate(next.getDate()+1);
+    return next.toISOString().slice(0,10) === endDate;
+  })();
+  const endTime = isAutoMidnight ? "" : rawEndTime;
 
   let status = storedStatus || "not-started";
   if (!storedStatus && checklist.length > 0) {
@@ -100,14 +106,18 @@ function eventToTask(ev) {
 
 function taskToEvent(task, calendarId) {
   const descFull  = encodeDesc(task.description, task.checklist, task.status);
-  const dueDate   = task.dueDate || new Date().toISOString().slice(0, 10);
-  const startTime = task.startTime || "08:00";
-  const endTime   = task.endTime || (() => {
-    const [h, m] = startTime.split(":").map(Number);
-    return String(h + 1).padStart(2, "0") + ":" + String(m).padStart(2, "0");
-  })();
-  const startISO = `${dueDate}T${startTime}:00`;
-  const endISO   = `${dueDate}T${endTime}:00`;
+  const dueDate        = task.dueDate || new Date().toISOString().slice(0, 10);
+  const hasStartTime   = !!task.startTime;
+  const hasEndTime     = !!task.endTime;
+  const startTime      = task.startTime || "00:00";
+  // If end time is blank, auto-set to 00:00 next day (midnight) but flag it
+  const endTime        = task.endTime || "00:00";
+  const startISO       = `${dueDate}T${startTime}:00`;
+  // End on next day if endTime was blank and startTime was also blank or endTime < startTime
+  const endDate        = (!hasEndTime)
+    ? (() => { const d = new Date(dueDate+"T00:00:00"); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })()
+    : dueDate;
+  const endISO         = `${endDate}T${endTime}:00`;
   return {
     id:         task.id || uid_gen(),
     calendarId,
@@ -282,7 +292,10 @@ function TaskTrackerPage({ ctx }) {
         const newEvents   = toMigrate.map(t => taskToEvent({ ...t, id: t.id || uid_gen() }, cal.id));
         const calEvts     = [...events.filter(e => e.calendarId === cal.id), ...newEvents];
         await calApi("WriteCalendar", { calendarId: Number(cal.id), ical: eventsToIcalB64(calEvts) }, sessionId);
-        setEvents(prev => [...prev, ...newEvents]);
+        setEvents(prev => {
+          const existingIds = new Set(prev.map(e => e.id));
+          return [...prev, ...newEvents.filter(e => !existingIds.has(e.id))];
+        });
         // Remove legacy localStorage entries now that migration succeeded
         legacyKeys.forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
         showToast(`Migrated ${toMigrate.length} task${toMigrate.length > 1 ? "s" : ""} to your account!`);
@@ -296,7 +309,7 @@ function TaskTrackerPage({ ctx }) {
     migrateLegacyTasks();
   // Run once when the calendar list and session are both ready
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, myCalendars().length]);
+  }, [sessionId]);
 
   // Apply filters
   let filtered = tasks;
@@ -384,16 +397,27 @@ function TaskTrackerPage({ ctx }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, sessionId]);
 
-  const duplicateTask = React.useCallback(async function duplicateTask(task) {
+  async function doduplicateTask(task) {
     const cal = getTaskCal(); if (!cal) return;
     try {
       const newTask  = { ...task, id:uid_gen(), title:task.title + " (Copy)", createdAt:new Date().toISOString() };
       const newEvent = taskToEvent(newTask, cal.id);
       const calEvts  = [...events.filter(e=>e.calendarId===cal.id), newEvent];
       await calApi("WriteCalendar", { calendarId: Number(cal.id), ical: eventsToIcalB64(calEvts) }, sessionId);
-      setEvents(prev=>[...prev, newEvent]);
+      setEvents(prev => {
+        const existingIds = new Set(prev.map(e => e.id));
+        return existingIds.has(newEvent.id) ? prev : [...prev, newEvent];
+      });
       showToast("Task duplicated!");
     } catch(e) { showToast("Failed to duplicate.","error"); }
+  }
+
+  const duplicateTask = React.useCallback(function duplicateTask(task) {
+    setConfirmDlg({
+      message: `Duplicate "${task.title}"?`,
+      danger: false,
+      onConfirm: () => doduplicateTask(task),
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, sessionId]);
 
@@ -431,8 +455,11 @@ function TaskTrackerPage({ ctx }) {
     const checkDone  = task.checklist?.filter(i=>i.checked).length||0;
     const checkTotal = task.checklist?.length||0;
     const pct = checkTotal ? Math.round((checkDone/checkTotal)*100) : null;
-    const isOverdue = task.dueDate && task.status !== "done" && new Date(task.dueDate+"T00:00:00") < new Date();
-
+    const now = new Date();
+    const startDt = task.startTime ? new Date(task.dueDate+"T"+task.startTime+":00") : null;
+    const endDt   = task.endTime   ? new Date((task.endDate||task.dueDate)+"T"+task.endTime+":00") : null;
+    const isOngoing = startDt && now >= startDt && (endDt ? now < endDt : true) && task.status !== "done";
+    const isOverdue = task.dueDate && task.status !== "done" && !isOngoing && new Date(task.dueDate+"T00:00:00") < now;
     function fmtTaskDate(dateStr) {
       if (!dateStr) return null;
       return new Date(dateStr+"T00:00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
@@ -451,9 +478,9 @@ function TaskTrackerPage({ ctx }) {
           <span style={{ fontSize:18, lineHeight:1, marginTop:2, flexShrink:0 }}>{TYPE_ICON[task.type]||"📌"}</span>
           <div style={{ fontWeight:700, fontSize:14, lineHeight:1.4, flex:1, minWidth:0, wordBreak:"break-word" }}>{task.title}</div>
           <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0, marginLeft:4 }}>
-            <button title="Duplicate" className="task-btn-edit" onClick={()=>onDuplicate(task)} style={{ fontSize:11 }}>⧉</button>
-            <button className="task-btn-edit" title="Edit" onClick={()=>onEdit(task)}>✏️</button>
-            <button className="task-btn-del" onClick={()=>onDelete(task.id)}>✕</button>
+            <button className="task-btn-edit" title="Edit" onMouseDown={e=>e.preventDefault()} onClick={()=>onEdit(task)} style={{ fontSize:11, width:24, height:24 }}>✎</button>
+            <button title="Duplicate" className="task-btn-edit" onMouseDown={e=>e.preventDefault()} onClick={()=>onDuplicate(task)} style={{ fontSize:11, width:24, height:24 }}>❐</button>
+            <button className="task-btn-del" onMouseDown={e=>e.preventDefault()} onClick={()=>onDelete(task.id)} style={{ fontSize:14, width:28, height:28 }}>✕</button>
           </div>
         </div>
 
@@ -477,26 +504,36 @@ function TaskTrackerPage({ ctx }) {
         </div>
 
         {/* Dates */}
-        {(task.dueDate || task.startTime || task.endTime) && (
-          <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
-            {task.dueDate && (
-              <div style={{ fontSize:11, color:isOverdue?"var(--red)":"var(--text3)", fontWeight:isOverdue?700:400 }}>
-                {isOverdue ? "⚠️ Overdue — " : "📅 Due: "}
-                {fmtTaskDate(task.dueDate)}
-              </div>
-            )}
-            {task.startTime && (
-              <div style={{ fontSize:11, color:"var(--text3)" }}>
-                🟢 Start: {fmtTaskTime(task.startTime)}
-              </div>
-            )}
-            {task.endTime && (
-              <div style={{ fontSize:11, color:"var(--text3)" }}>
-                🔴 End: {fmtTaskTime(task.endTime)}
-              </div>
-            )}
-          </div>
-        )}
+        {(task.dueDate || task.startTime || task.endTime) && (() => {
+          const now = new Date();
+          const startDt = task.startTime ? new Date(task.dueDate+"T"+task.startTime+":00") : null;
+          const endDt   = task.endTime   ? new Date((task.endDate||task.dueDate)+"T"+task.endTime+":00") : null;
+          return (
+            <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              {task.dueDate && (
+                <div style={{ fontSize:11, color:isOverdue?"var(--red)":"var(--text3)", fontWeight:isOverdue?700:400 }}>
+                  {isOverdue ? "⚠️ Overdue — " : "📅 Due: "}
+                  {fmtTaskDate(task.dueDate)}
+                </div>
+              )}
+              {isOngoing && (
+                <div style={{ fontSize:11, color:"var(--green)", fontWeight:700 }}>
+                  🔄 Ongoing Task
+                </div>
+              )}
+              {task.startTime && (
+                <div style={{ fontSize:11, color:"var(--text3)" }}>
+                  🟢 Start: {fmtTaskTime(task.startTime)}
+                </div>
+              )}
+              {task.endTime && (
+                <div style={{ fontSize:11, color:"var(--text3)" }}>
+                  🔴 End: {fmtTaskTime(task.endTime)}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Description */}
         {task.description && (

@@ -235,6 +235,9 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
   }, [sessionId, currentUser?.id]);
 }
 
+
+
+
 async function apiCall(endpoint, body = {}, sessionId = null) {
   const headers = { "Content-Type": "application/json" };
   if (sessionId) headers["Authorization"] = `Bearer ${sessionId}`;
