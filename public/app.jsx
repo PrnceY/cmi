@@ -62,7 +62,9 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
   const prevJoinStatus   = useRef({});
   const prevRole         = useRef({});
   const prevEventCount   = useRef({});
+  const prevOrgIds       = useRef(null); // null = not yet initialized; Set after first poll
   const initialized      = useRef(false);
+  const resolvedReqIds   = useRef(new Set()); // never re-fetch resolved join requests
 
   useEffect(() => {
     if (!sessionId || !currentUser) return;
@@ -72,18 +74,38 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
     prevJoinStatus.current   = {};
     prevRole.current         = {};
     prevEventCount.current   = {};
+    prevOrgIds.current       = null;
     initialized.current      = false;
+    resolvedReqIds.current   = new Set();
 
     let isPolling = false;
     async function poll() {
-      if (isPolling) { console.log("[Poller] skipped — previous poll still running"); return; }
+      if (isPolling) return;
       isPolling = true;
-      console.log("[Poller] poll() fired — sessionId present:", !!sessionId, "| userId:", currentUser?.id);
       try {
         // ── 1. Get all orgs the user is part of ──
         const orgRes = await apiCall("/organizations.v2.OrganizationService/GetUserOrganizations", {}, sessionId);
         const orgIds = orgRes.organizationIds || [];
-        console.log("[Poller] orgIds found:", orgIds);
+        const currentOrgIdSet = new Set(orgIds.map(String));
+
+        // ── Detect ban/removal: org was in previous set but is gone now ──
+        if (initialized.current && prevOrgIds.current !== null) {
+          for (const prevId of prevOrgIds.current) {
+            if (!currentOrgIdSet.has(prevId)) {
+              let orgName = `Org #${prevId}`;
+              try {
+                const d = await apiCall("/organizations.v2.OrganizationService/GetOrganization", { organizationId: Number(prevId) }, sessionId);
+                orgName = d.name || orgName;
+              } catch(e) { /* org may be deleted, use fallback */ }
+              const msg = `You have been removed from "${orgName}".`;
+              addNotification({ title: "Removed from Group", body: msg, icon: "🚫", time: new Date(), page: "organizations", boldName: orgName });
+              sendBrowserNotification("Removed from Group", msg);
+              delete prevRole.current[prevId];
+              delete prevJoinRequests.current[prevId];
+            }
+          }
+        }
+        prevOrgIds.current = currentOrgIdSet;
 
         for (const orgId of orgIds) {
           const numId = Number(orgId);
@@ -93,7 +115,6 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
           try {
             const r = await apiCall("/organizations.v2.OrganizationMemberRoleService/GetMemberRole", { organizationId: numId, memberUserId: currentUser.id }, sessionId);
             role = (r.role || "user").toLowerCase();
-            console.log(`[Poller] org ${orgId} role:`, role);
           } catch(e) { console.warn(`[Poller] GetMemberRole failed for org ${orgId}:`, e.message); }
 
           // ── 3. Role change notification — only after first poll, only on actual change ──
@@ -121,7 +142,6 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
             try {
               const jRes = await apiCall("/organizations.v2.OrganizationJoinRequestService/GetOpenJoinRequests", { organizationId: numId }, sessionId);
               const count = (jRes.joinRequestEventIds || []).length;
-              console.log(`[Poller] org ${orgId} open join requests:`, count);
               const prev = prevJoinRequests.current[orgId];
               // Fire if count grew, OR first time we see pending requests already exist
               const shouldNotifyJoin = count > 0 && (
@@ -130,13 +150,16 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
               );
               if (shouldNotifyJoin) {
                 let orgName = `Org #${orgId}`;
+                let orgType = "organization";
                 try {
                   const d = await apiCall("/organizations.v2.OrganizationService/GetOrganization", { organizationId: numId }, sessionId);
                   orgName = d.name || orgName;
+                  const parsed = parseGroupDesc(d.description || "");
+                  orgType = parsed.type || "organization";
                 } catch(e) { console.warn(`[Poller] GetOrganization (join req) failed for org ${orgId}:`, e.message); }
                 const newCount = prev === undefined ? count : count - prev;
                 const msg = `${newCount} pending join request${newCount > 1 ? "s" : ""} in ${orgName}.`;
-                addNotification({ title: "New Join Request", body: msg, icon: "📥", time: new Date(), page: "organizations", action: "open-join-requests", orgId: String(numId), boldName: orgName });
+                addNotification({ title: "New Join Request", body: msg, icon: "📥", time: new Date(), page: "organizations", action: "open-join-requests", orgId: String(numId), boldName: orgName, orgName, orgType });
                 sendBrowserNotification("New Join Request", msg);
               }
               prevJoinRequests.current[orgId] = count;
@@ -148,18 +171,19 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
         try {
           const myReqRes = await apiCall("/organizations.v2.OrganizationJoinRequestService/GetUserJoinRequests", {}, sessionId);
           const myReqIds = myReqRes.joinRequestEventIds || [];
-          console.log("[Poller] my join request ids:", myReqIds);
           for (const reqId of myReqIds) {
+            // Skip requests already resolved — no need to re-fetch them ever again
+            if (resolvedReqIds.current.has(reqId)) continue;
             try {
               const req = await apiCall("/organizations.v2.OrganizationJoinRequestService/GetJoinRequest", { joinRequestEventId: reqId }, sessionId);
               const status = (req.status || "").toLowerCase();
-              console.log(`[Poller] join request ${reqId} status:`, status);
               const isResolved = status === "accepted" || status === "rejected" || status === "retracted";
               const prev = prevJoinStatus.current[reqId];
-              // Fire if status changed to resolved, OR if first time we see it already resolved (accepted while app was closed)
+              // Fire if status changed, OR first time we see it already resolved — but suppress "retracted"
+              // on first sight since the backend uses "retracted" as the initial state for pending requests.
               const shouldNotify = isResolved && (
                 (prev !== undefined && prev !== status) ||
-                (prev === undefined && initialized.current)
+                (prev === undefined && initialized.current && status !== "retracted")
               );
               if (shouldNotify) {
                   // ── Resolve org name via: joinResponseEventId → GetJoinResponse → joinPromptEventId → GetJoinPrompt → organizationId → GetOrganization ──
@@ -190,27 +214,31 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
                     msg
                   );
               }
+              // Only permanently skip if truly resolved — don't skip "retracted" on first sight
+              // since that's the backend's initial state for a pending request.
+              if (isResolved && !(status === "retracted" && prev === undefined)) {
+                resolvedReqIds.current.add(reqId);
+              }
               prevJoinStatus.current[reqId] = status;
             } catch(e) { console.warn(`[Poller] GetJoinRequest failed for reqId ${reqId}:`, e.message); }
           }
         } catch(e) { console.warn("[Poller] GetUserJoinRequests failed:", e.message); }
 
-        // ── 6. New events — only track org-shared calendars (not personal) ──
+        // ── 6. New events — only track org-shared calendars (not personal/owned) ──
         try {
           const calRes = await calApi("GetCalendars", {}, sessionId);
           const calIds = (calRes.calendarIds || []).map(String);
-          console.log("[Poller] calendars found:", calIds);
           for (const calId of calIds) {
             try {
               const cal = await calApi("GetCalendar", { calendarId: Number(calId) }, sessionId);
-              console.log(`[Poller] cal ${calId} (${cal.name})`);
-
+              // Skip calendars owned by the current user — only notify for org-shared ones
+              if (String(cal.ownerUserId) === String(currentUser.id)) {
+                continue;
+              }
               const evts = icalToEvents(cal.ical || "", calId);
               const nonTaskEvts = evts.filter(e => !(e.title || "").startsWith("TASK:"));
               const count = nonTaskEvts.length;
               const prev  = prevEventCount.current[calId];
-              console.log(`[Poller] cal ${calId} count=${count} prev=${prev} initialized=${initialized.current}`);
-
               if (initialized.current && prev !== undefined && count > prev) {
                 const calName = cal.name || `Calendar #${calId}`;
                 const diff = count - prev;
@@ -224,13 +252,12 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
         } catch(e) { console.warn("[Poller] GetCalendars failed:", e.message); }
 
         initialized.current = true;
-        console.log("[Poller] poll() complete — initialized set to true");
       } catch(e) { console.error("[Poller] poll() top-level crash:", e.message, e); }
       finally { isPolling = false; }
     }
 
     poll();
-    const interval = setInterval(poll, 1000);
+    const interval = setInterval(poll, 30_000); // 30s — was 1s (30× DB reduction)
     return () => clearInterval(interval);
   }, [sessionId, currentUser?.id]);
 }
@@ -747,6 +774,36 @@ function Toast({ toast }) {
   return <div style={{position:"fixed",bottom:24,right:16,zIndex:999,background:bg,border:`1px solid ${border}`,color,borderRadius:12,padding:"13px 20px",fontSize:14,fontWeight:600,boxShadow:"0 8px 32px rgba(0,0,0,0.4)",maxWidth:300,fontFamily:"DM Sans,sans-serif"}}>{toast.msg}</div>;
 }
 
+// ─── AUTH ERROR MAPPER ────────────────────────────────────────────────────────
+function friendlyAuthError(raw, context = "login") {
+  if (!raw) return "Something went wrong.";
+  const msg = raw.toLowerCase();
+
+  if (msg.includes("no rows") || msg.includes("not found") || msg.includes("sql") ||
+      msg.includes("no user") || msg.includes("does not exist") || msg.includes("invalid user"))
+    return "Account not found.";
+
+  if (msg.includes("invalid password") || msg.includes("wrong password") ||
+      msg.includes("incorrect password") || msg.includes("password mismatch") ||
+      msg.includes("unauthorized") || msg.includes("401"))
+    return "Invalid password.";
+
+  if (msg.includes("already") || msg.includes("duplicate") || msg.includes("exists") ||
+      msg.includes("unique") || msg.includes("conflict") || msg.includes("taken"))
+    return "Email already in use.";
+
+  if (msg.includes("invalid email") || msg.includes("email format") || msg.includes("valid email"))
+    return "Invalid email address.";
+
+  if (msg.includes("no session") || msg.includes("session") || msg.includes("token"))
+    return context === "login" ? "Sign-in failed. Try again." : "Account created. Please sign in.";
+
+  const cleaned = raw.replace(/^(error|exception|rpc error[^:]*:)\s*/i, "").trim();
+  return cleaned.length > 2
+    ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
+    : "Something went wrong.";
+}
+
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 function AuthPage({ onLogin }) {
   const [email,setEmail]          = useState("");
@@ -759,7 +816,9 @@ function AuthPage({ onLogin }) {
   const [activeTab,setActiveTab]  = useState("login");
 
   async function handleLogin() {
-    if (!email||!password) { setError("Email and password are required."); return; }
+    if (!email && !password) { setError("Email and password required."); return; }
+    if (!email)    { setError("Email required."); return; }
+    if (!password) { setError("Password required."); return; }
     setError(""); setLoading(true);
     try {
       const r = await apiCall("/users.v2.UserService/LoginUser", { email, password });
@@ -776,12 +835,17 @@ function AuthPage({ onLogin }) {
       const finalUser = { ...user, email: email || user.email, name: user.name || email, userType: "student" };
       // Existing login — isNewUser=false (default), tutorial will NOT fire
       onLogin(finalUser, sid, false);
-    } catch(e) { setError(e.message || "Login failed. Check your credentials."); }
+    } catch(e) { setError(friendlyAuthError(e.message, "login")); }
     finally { setLoading(false); }
   }
 
   async function handleRegister() {
-    if (!firstName||!lastName||!email||!password) { setError("All fields are required."); return; }
+    if (!firstName && !lastName && !email && !password) { setError("All fields are required."); return; }
+    if (!firstName)  { setError("First name required."); return; }
+    if (!lastName)   { setError("Last name required."); return; }
+    if (!email)      { setError("Email required."); return; }
+    if (!email.includes("@")) { setError("Invalid email address."); return; }
+    if (!password)   { setError("Password required."); return; }
     setError(""); setLoading(true);
     try {
       const body = { email, password, firstName, lastName };
@@ -816,7 +880,7 @@ function AuthPage({ onLogin }) {
       }
       // ✅ isNewUser=true — triggers the onboarding tutorial in App
       onLogin(finalUser, sid, true);
-    } catch(e) { setError(e.message || "Registration failed. That email may already be in use."); }
+    } catch(e) { setError(friendlyAuthError(e.message, "register")); }
     finally { setLoading(false); }
   }
 
@@ -1133,8 +1197,8 @@ function NotificationsModal({ notifications, setNotifications, setPage, onClose,
     onClose();
     if (n.action === "open-join-requests" && n.orgId) {
       setPage("organizations");
-      window.__pendingJoinRequestsOrgId = n.orgId;
-      window.dispatchEvent(new CustomEvent("openJoinRequests", { detail: { orgId: n.orgId } }));
+      window.__pendingJoinRequestsOrgId = { orgId: n.orgId, orgName: n.orgName || null, orgType: n.orgType || null };
+      window.dispatchEvent(new CustomEvent("openJoinRequests", { detail: { orgId: n.orgId, orgName: n.orgName || null, orgType: n.orgType || null } }));
     } else if (n.page) {
       setPage(n.page);
     }
@@ -1211,8 +1275,8 @@ function Topbar({ page, ctx, setPage, onMenuClick }) {
     setNotifOpen(false);
     if (n.action === "open-join-requests" && n.orgId) {
       setPage("organizations");
-      window.__pendingJoinRequestsOrgId = n.orgId;
-      window.dispatchEvent(new CustomEvent("openJoinRequests", { detail: { orgId: n.orgId } }));
+      window.__pendingJoinRequestsOrgId = { orgId: n.orgId, orgName: n.orgName || null, orgType: n.orgType || null };
+      window.dispatchEvent(new CustomEvent("openJoinRequests", { detail: { orgId: n.orgId, orgName: n.orgName || null, orgType: n.orgType || null } }));
     } else if (n.page) {
       setPage(n.page);
     }
