@@ -996,7 +996,7 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
     ]},
   ];
   const navItems = navGroups.flatMap(g => g.items);
-
+  
   return (
     <div className={`sidebar${isOpen ? " open" : ""}${collapsed ? " collapsed" : ""}`}>
       {/* Logo / collapse toggle */}
@@ -1007,7 +1007,7 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
         }
       </div>
 
-      {/* User avatar */}
+      {/* User avatarr */}
       <div className="sidebar-user" style={{ justifyContent: collapsed ? "center" : undefined, padding: collapsed ? "12px 0" : undefined }}>
         <div className="user-avatar" title={collapsed ? ([currentUser.first_name, currentUser.last_name].filter(Boolean).join(" ") || currentUser.name) : undefined} style={{ background: ac, flexShrink: 0 }}>{initials}</div>
         {!collapsed && (
