@@ -200,12 +200,25 @@ function OrganizationsTab({ ctx }) {
 
   // ── Deep-link handler: open ManageOrgModal on join-requests when triggered from notification
   React.useEffect(() => {
-    async function openPendingJoinRequests(orgId) {
+    async function openPendingJoinRequests(orgId, orgName, orgType) {
       const idStr = String(orgId);
-      // Try to use already-loaded org data first
+      // 1. Best case — tab already loaded, use in-memory data
       let orgData = orgDetails[idStr];
+      // 2. Notification carried orgName + orgType — build minimal object, zero DB calls
+      if (!orgData && orgName) {
+        orgData = {
+          id: idStr,
+          name: orgName,
+          type: orgType || "organization",
+          genre: null,
+          description: "",
+          rawDescription: "",
+          requiresJoinRequest: false,
+          createdAt: null,
+        };
+      }
+      // 3. True last resort — tab not loaded AND no name passed (should not happen normally)
       if (!orgData) {
-        // Fetch directly if not loaded yet
         try {
           const d = await orgApi("GetOrganization", { organizationId: Number(idStr) }, sessionId);
           const parsed = parseGroupDesc(d.description || "");
@@ -227,7 +240,7 @@ function OrganizationsTab({ ctx }) {
     // Handle if already on page when notification is clicked
     function onOpenJoinRequests(e) {
       window.__pendingJoinRequestsOrgId = null;
-      openPendingJoinRequests(e.detail.orgId);
+      openPendingJoinRequests(e.detail.orgId, e.detail.orgName, e.detail.orgType);
     }
     window.addEventListener("openJoinRequests", onOpenJoinRequests);
 
@@ -235,7 +248,11 @@ function OrganizationsTab({ ctx }) {
     const pending = window.__pendingJoinRequestsOrgId;
     if (pending) {
       window.__pendingJoinRequestsOrgId = null;
-      openPendingJoinRequests(pending);
+      // Support both old string format and new { orgId, orgName, orgType } object
+      const orgId   = pending?.orgId   ?? pending;
+      const orgName = pending?.orgName ?? null;
+      const orgType = pending?.orgType ?? null;
+      openPendingJoinRequests(orgId, orgName, orgType);
     }
 
     return () => window.removeEventListener("openJoinRequests", onOpenJoinRequests);
@@ -988,7 +1005,8 @@ function ManageOrgModal({ ctx, orgId, org, initialSection }) {
     } catch(e) { showToast(e.message || "Failed to delete label.", "error"); }
   }
 
-  React.useEffect(() => { loadSharedCals(); loadJoinPrompt(); }, [orgId]);
+  React.useEffect(() => { if (activeSection === "calendars") loadSharedCals(); }, [activeSection, orgId]);
+  React.useEffect(() => { if (activeSection === "join-prompt") loadJoinPrompt(); }, [activeSection, orgId]);
   React.useEffect(() => { if (activeSection === "members") loadMembers(); }, [activeSection, orgId]);
   React.useEffect(() => { if (activeSection === "activity") loadActivity(); }, [activeSection, orgId]);
   React.useEffect(() => { if (activeSection === "join-requests") loadJoinRequests(); }, [activeSection, orgId]);
@@ -1365,7 +1383,7 @@ function ManageOrgModal({ ctx, orgId, org, initialSection }) {
                               className="btn btn-sm btn-ghost"
                               style={{ fontSize:11, padding:"3px 9px", color: isAdmin ? "var(--text2)" : "var(--green)", border:`1px solid ${isAdmin ? "var(--border)" : "rgba(52,211,153,0.4)"}` }}
                               onClick={() => {
-                                const newRole = isAdmin ? "user" : "admin";
+                                const newRole = isAdmin ? "member" : "admin";
                                 setConfirmDlg({
                                   message: isAdmin ? `Demote ${m.name}?` : `Promote ${m.name} to Admin?`,
                                   description: isAdmin
