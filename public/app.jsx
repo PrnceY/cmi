@@ -1119,7 +1119,7 @@ function NotifRow({ n, i, onNavigate, onDismiss, compact }) {
   );
 }
 
-// Full-history modal — groups notifications into "Today" and "Earlier".
+// FFull-history modal — groups notifications into "Today" and "Earlier".
 function NotificationsModal({ notifications, setNotifications, setPage, onClose, setNotifOpen }) {
   const today = new Date();
   const todayNotifs = notifications.filter(n => {
