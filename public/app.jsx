@@ -914,7 +914,7 @@ function AuthPage({ onLogin }) {
 
           {/* Feature pills */}
           <div className="auth-hero-pills">
-            {[["📅","Calendar Sharing","#6c63ff"],["✅","Task Tracking","#34d399"],["👥","Group Calendars","#60a5fa"],["✨","AI Tools","#2dd4bf"]].map(([ic,lbl,c])=>(
+            {[["📅","Calendar Sharing","#6c63ff"],["📝","Task Tracking","#34d399"],["👥","Group Calendars","#60a5fa"],["✨","AI Tools","#2dd4bf"]].map(([ic,lbl,c])=>(
               <span key={lbl} className="auth-pill" style={{"--pill-color":c}}>{ic} {lbl}</span>
             ))}
           </div>
@@ -1823,7 +1823,7 @@ function AboutContent() {
 
   const features = [
     { icon:"📅", label:"Calendar Sharing" },
-    { icon:"✅", label:"Task Tracking" },
+    { icon:"📝", label:"Task Tracking" },
     { icon:"👥", label:"Group Calendars" },
     { icon:"✨", label:"AI Tools" },
   ];
@@ -1966,7 +1966,7 @@ function AboutContent() {
             University of San Carlos · DCISM · {new Date().getFullYear()}
           </div>
           <div style={{ display:"flex", gap:6 }}>
-            {["📅","✅","👥","✨"].map((e,i)=>(
+            {["📅","📝","👥","✨"].map((e,i)=>(
               <span key={i} style={{ fontSize:16, opacity:0.4 }}>{e}</span>
             ))}
           </div>
