@@ -988,7 +988,7 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
     ]},
     { label: "WORKSPACE", items: [
       {id:"organizations", icon:"🏛",  label:"Organizations"},
-      {id:"tasks",         icon:"✅", label:"Task Tracker"},
+      {id:"tasks",         icon:"📝", label:"Task Tracker"},
       {id:"ai",            icon:"✨", label:"AI Tools"},
     ]},
     { label: "ACCOUNT", items: [
