@@ -135,6 +135,44 @@ const GROUP_TYPE_ICONS = {
 function orgColor(id)    { return PALETTE[Math.abs(Number(id) || 0) % PALETTE.length]; }
 function orgInitials(name) { return (name || "?").split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase(); }
 
+// ─── EXPANDABLE DESCRIPTION ───────────────────────────────────────────────────
+function ExpandableDesc({ text, style }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const [isOverflowing, setIsOverflowing] = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useLayoutEffect(() => {
+    if (ref.current) {
+      setIsOverflowing(ref.current.scrollHeight > ref.current.clientHeight + 1);
+    }
+  }, [text]);
+
+  if (!text) return null;
+  return (
+    <div style={style}>
+      <span
+        ref={ref}
+        style={{
+          wordBreak: "break-word",
+          overflowWrap: "break-word",
+          display: !expanded ? "-webkit-box" : "block",
+          WebkitLineClamp: !expanded ? 1 : undefined,
+          WebkitBoxOrient: !expanded ? "vertical" : undefined,
+          overflow: !expanded ? "hidden" : undefined,
+        }}>
+        {text}
+      </span>
+      {(isOverflowing || expanded) && (
+        <button
+          onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+          style={{ display:"block", marginTop:2, fontSize:11, fontWeight:700, color:"var(--accent2)", background:"none", border:"none", cursor:"pointer", padding:0 }}>
+          {expanded ? "Show Less" : "Read More"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── ORGANIZATIONS TAB ────────────────────────────────────────────────────────
 function OrganizationsTab({ ctx }) {
   const { sessionId, currentUser, setModal, showToast, refreshCalendars } = ctx;
@@ -554,7 +592,7 @@ function OrganizationsTab({ ctx }) {
 
                 {/* Description */}
                 {org.description && (
-                  <div className="cal-card-type" style={{ marginBottom:10, lineHeight:1.5 }}>{org.description}</div>
+                  <ExpandableDesc text={org.description} style={{ marginBottom:10, lineHeight:1.5, fontSize:13, color:"var(--text2)" }} />
                 )}
 
                 {/* Created date */}
