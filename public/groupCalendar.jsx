@@ -564,7 +564,7 @@ function ManageCalendarModal({ ctx, calendar }) {
   async function saveMetadata() {
     setMetaLoading(true); setError("");
     try {
-      await calApi("UpdateCalendarMetadata", {
+      await calApi("UpdateCalendar", {
         calendarId:  calendar.id,
         name:        metaName  || undefined,
         description: metaDesc  || undefined,
