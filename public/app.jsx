@@ -257,7 +257,7 @@ function useNotificationPoller(sessionId, currentUser, addNotification) {
     }
 
     poll();
-    const interval = setInterval(poll, 30_000); // 30s — was 1s (30× DB reduction)
+    const interval = setInterval(poll, 3_000); // 3
     return () => clearInterval(interval);
   }, [sessionId, currentUser?.id]);
 }
