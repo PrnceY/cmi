@@ -317,17 +317,37 @@ function icalToEvents(icalBase64, calendarId) {
   const events = [];
   const vevents = text.split("BEGIN:VEVENT").slice(1);
   for (const block of vevents) {
-    const get = (key) => { const m = block.match(new RegExp(`${key}[^:]*:([^\r\n]*)`, "i")); return m ? icalUnescape(m[1].trim()) : ""; };
+    const get     = (key) => { const m = block.match(new RegExp(`${key}[^:]*:([^\r\n]*)`, "i")); return m ? icalUnescape(m[1].trim()) : ""; };
+    const getTzid = (key) => { const m = block.match(new RegExp(`${key};TZID=([^:]+):`, "i")); return m ? m[1].trim() : null; };
     const uid = get("UID") || uid_gen(), summary = get("SUMMARY");
     if (!summary) continue;
-    events.push({ id:uid, calendarId:calId, title:summary, startTime:fromIcalDate(get("DTSTART")), endTime:fromIcalDate(get("DTEND")),
+    events.push({ id:uid, calendarId:calId, title:summary, startTime:fromIcalDate(get("DTSTART"), getTzid("DTSTART")), endTime:fromIcalDate(get("DTEND"), getTzid("DTEND")),
       location:get("LOCATION"), description:get("DESCRIPTION"), isImportant:get("PRIORITY")==="1",
       createdBy:null, createdAt:fromIcalDate(get("CREATED"))||new Date().toISOString() });
   }
   return events;
 }
 function toIcalDate(iso) { if(!iso) return ""; const d=new Date(iso),pad=n=>String(n).padStart(2,"0"); return `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`; }
-function fromIcalDate(s) { if(!s) return new Date().toISOString(); const m=s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/); if(!m) return new Date().toISOString(); return new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7]||"Z"}`).toISOString(); }
+function fromIcalDate(s, tzid) {
+  if (!s) return new Date().toISOString();
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/);
+  if (!m) return new Date().toISOString();
+  if (m[7] === "Z") return new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`).toISOString();
+  if (tzid) {
+    try {
+      const naive = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`;
+      const tempUtc = new Date(naive + "Z");
+      const localStr = tempUtc.toLocaleString("en-US", { timeZone: tzid, hour12: false,
+        year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit" });
+      const [datePart, timePart] = localStr.split(", ");
+      const [mm, dd, yyyy] = datePart.split("/");
+      const utcOfLocal = new Date(`${yyyy}-${mm}-${dd}T${timePart}Z`);
+      const offsetMs = utcOfLocal - tempUtc;
+      return new Date(tempUtc.getTime() - offsetMs).toISOString();
+    } catch(e) { /* fall through */ }
+  }
+  return new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`).toISOString();
+}
 function icalEscape(s)       { return (s||"").replace(/\n/g,"\\n").replace(/,/g,"\\,").replace(/;/g,"\\;"); }
 function icalUnescape(s)     { return (s||"").replace(/\\n/g,"\n").replace(/\\,/g,",").replace(/\\;/g,";"); }
 function eventsToIcalB64(ev) {
