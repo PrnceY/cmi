@@ -351,7 +351,7 @@ function fromIcalDate(s, tzid) {
 function icalEscape(s)       { return (s||"").replace(/\n/g,"\\n").replace(/,/g,"\\,").replace(/;/g,"\\;"); }
 function icalUnescape(s)     { return (s||"").replace(/\\n/g,"\n").replace(/\\,/g,",").replace(/\\;/g,";"); }
 function eventsToIcalB64(ev) {
-  // iCal content must be encoded to base64 for the protobuf JSON `bytes` field.
+  // iCal content must be enccoded to base64 for the protobuf JSON `bytes` field.
   // We escape non-Latin chars so btoa never throws on special characters.
   return btoa(unescape(encodeURIComponent(eventsToIcal(ev))));
 }
