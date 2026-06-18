@@ -758,7 +758,7 @@ function CreateGroupModal({ ctx }) {
 // ─── MANAGE ORG MODAL ─────────────────────────────────────────────────────────
 function ManageOrgModal({ ctx, orgId, org, initialSection }) {
   const { sessionId, closeModal, showToast, myCalendars, currentUser } = ctx;
-
+  const isStudyHub = org.type === "study-hub";
 
   const [name,        setName]        = React.useState(org.name || "");
   const [description, setDescription] = React.useState(org.description || "");
@@ -1541,6 +1541,7 @@ function JoinPromptModal({ ctx, orgId, org, prompt }) {
 // ─── ORG DETAIL MODAL ─────────────────────────────────────────────────────────
 function OrgDetailModal({ ctx, orgId, org }) {
   const { sessionId, closeModal } = ctx;
+  const isStudyHub = org.type === "study-hub";
   const [sharedCalIds,   setSharedCalIds]   = React.useState([]);
   const [calDetails,     setCalDetails]     = React.useState({});
   const [loading,        setLoading]        = React.useState(true);
@@ -1687,6 +1688,7 @@ function OrgDetailModal({ ctx, orgId, org }) {
 // ─── ORG MEMBERS MODAL ────────────────────────────────────────────────────────
 function OrgMembersModal({ ctx, orgId, org }) {
   const { sessionId, closeModal } = ctx;
+  const isStudyHub = org.type === "study-hub";
   const [members, setMembers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const col = orgColor(orgId);
