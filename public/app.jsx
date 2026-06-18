@@ -43,228 +43,6 @@ const { useState, useEffect, useCallback, useRef } = React;
 
 const API_BASE = "https://countmein-api.dcism.org";
 
-// ─── NOTIFICATION HELPERS ─────────────────────────────────────────────────────
-function requestNotificationPermission() {
-  if ("Notification" in window && Notification.permission === "default") {
-    Notification.requestPermission();
-  }
-}
-
-function sendBrowserNotification(title, body) {
-  if ("Notification" in window && Notification.permission === "granted") {
-    new Notification(title, { body, icon: "assets/SchedU.png" });
-  }
-}
-
-// ─── NOTIFICATION POLLER HOOK ─────────────────────────────────────────────────
-function useNotificationPoller(sessionId, currentUser, addNotification) {
-  const prevJoinRequests = useRef({});
-  const prevJoinStatus   = useRef({});
-  const prevRole         = useRef({});
-  const prevEventCount   = useRef({});
-  const prevOrgIds       = useRef(null); // null = not yet initialized; Set after first poll
-  const initialized      = useRef(false);
-  const resolvedReqIds   = useRef(new Set()); // never re-fetch resolved join requests
-
-  useEffect(() => {
-    if (!sessionId || !currentUser) return;
-
-    // ── Reset ALL state when user/session changes (prevents cross-account bleed) ──
-    prevJoinRequests.current = {};
-    prevJoinStatus.current   = {};
-    prevRole.current         = {};
-    prevEventCount.current   = {};
-    prevOrgIds.current       = null;
-    initialized.current      = false;
-    resolvedReqIds.current   = new Set();
-
-    let isPolling = false;
-    async function poll() {
-      if (isPolling) return;
-      isPolling = true;
-      try {
-        // ── 1. Get all orgs the user is part of ──
-        const orgRes = await apiCall("/organizations.v2.OrganizationService/GetUserOrganizations", {}, sessionId);
-        const orgIds = orgRes.organizationIds || [];
-        const currentOrgIdSet = new Set(orgIds.map(String));
-
-        // ── Detect ban/removal: org was in previous set but is gone now ──
-        if (initialized.current && prevOrgIds.current !== null) {
-          for (const prevId of prevOrgIds.current) {
-            if (!currentOrgIdSet.has(prevId)) {
-              let orgName = `Org #${prevId}`;
-              try {
-                const d = await apiCall("/organizations.v2.OrganizationService/GetOrganization", { organizationId: Number(prevId) }, sessionId);
-                orgName = d.name || orgName;
-              } catch(e) { /* org may be deleted, use fallback */ }
-              const msg = `You have been removed from "${orgName}".`;
-              addNotification({ title: "Removed from Group", body: msg, icon: "🚫", time: new Date(), page: "organizations", boldName: orgName });
-              sendBrowserNotification("Removed from Group", msg);
-              delete prevRole.current[prevId];
-              delete prevJoinRequests.current[prevId];
-            }
-          }
-        }
-        prevOrgIds.current = currentOrgIdSet;
-
-        for (const orgId of orgIds) {
-          const numId = Number(orgId);
-
-          // ── 2. Get current user's role in this org ──
-          let role = "user";
-          try {
-            const r = await apiCall("/organizations.v2.OrganizationMemberRoleService/GetMemberRole", { organizationId: numId, memberUserId: currentUser.id }, sessionId);
-            role = (r.role || "user").toLowerCase();
-          } catch(e) { console.warn(`[Poller] GetMemberRole failed for org ${orgId}:`, e.message); }
-
-          // ── 3. Role change notification — only after first poll, only on actual change ──
-          // Skip if prev is undefined (org just appeared for the first time, e.g. user just got accepted)
-          const KNOWN_ROLES = ["owner", "admin", "member", "user"];
-          if (initialized.current) {
-            const prev = prevRole.current[orgId];
-            if (prev !== undefined && prev !== role && KNOWN_ROLES.includes(prev)) {
-              let orgName = `Org #${orgId}`;
-              try {
-                const d = await apiCall("/organizations.v2.OrganizationService/GetOrganization", { organizationId: numId }, sessionId);
-                orgName = d.name || orgName;
-              } catch(e) { console.warn(`[Poller] GetOrganization failed for org ${orgId}:`, e.message); }
-              const msg = role === "admin"
-                ? `You've been promoted to Admin in ${orgName}!`
-                : `Your role in ${orgName} has been updated to Member.`;
-                addNotification({ title: "Role Updated", body: msg, icon: "🏅", time: new Date(), page: "organizations", boldName: orgName });
-              sendBrowserNotification("Role Updated", msg);
-            }
-          }
-          prevRole.current[orgId] = role;
-
-          // ── 4. New join requests (owner only) ──
-          if (role === "owner") {
-            try {
-              const jRes = await apiCall("/organizations.v2.OrganizationJoinRequestService/GetOpenJoinRequests", { organizationId: numId }, sessionId);
-              const count = (jRes.joinRequestEventIds || []).length;
-              const prev = prevJoinRequests.current[orgId];
-              // Fire if count grew, OR first time we see pending requests already exist
-              const shouldNotifyJoin = count > 0 && (
-                (prev !== undefined && count > prev) ||
-                (prev === undefined && initialized.current)
-              );
-              if (shouldNotifyJoin) {
-                let orgName = `Org #${orgId}`;
-                let orgType = "organization";
-                try {
-                  const d = await apiCall("/organizations.v2.OrganizationService/GetOrganization", { organizationId: numId }, sessionId);
-                  orgName = d.name || orgName;
-                  const parsed = parseGroupDesc(d.description || "");
-                  orgType = parsed.type || "organization";
-                } catch(e) { console.warn(`[Poller] GetOrganization (join req) failed for org ${orgId}:`, e.message); }
-                const newCount = prev === undefined ? count : count - prev;
-                const msg = `${newCount} pending join request${newCount > 1 ? "s" : ""} in ${orgName}.`;
-                addNotification({ title: "New Join Request", body: msg, icon: "📥", time: new Date(), page: "organizations", action: "open-join-requests", orgId: String(numId), boldName: orgName, orgName, orgType });
-                sendBrowserNotification("New Join Request", msg);
-              }
-              prevJoinRequests.current[orgId] = count;
-            } catch(e) { console.warn(`[Poller] GetOpenJoinRequests failed for org ${orgId}:`, e.message); }
-          }
-        }
-
-        // ── 5. Join request status change (member side) ──
-        try {
-          const myReqRes = await apiCall("/organizations.v2.OrganizationJoinRequestService/GetUserJoinRequests", {}, sessionId);
-          const myReqIds = myReqRes.joinRequestEventIds || [];
-          for (const reqId of myReqIds) {
-            // Skip requests already resolved — no need to re-fetch them ever again
-            if (resolvedReqIds.current.has(reqId)) continue;
-            try {
-              const req = await apiCall("/organizations.v2.OrganizationJoinRequestService/GetJoinRequest", { joinRequestEventId: reqId }, sessionId);
-              const status = (req.status || "").toLowerCase();
-              const isResolved = status === "accepted" || status === "rejected" || status === "retracted";
-              const prev = prevJoinStatus.current[reqId];
-              // Fire if status changed, OR first time we see it already resolved — but suppress "retracted"
-              // on first sight since the backend uses "retracted" as the initial state for pending requests.
-              const shouldNotify = isResolved && (
-                (prev !== undefined && prev !== status) ||
-                (prev === undefined && initialized.current && status !== "retracted")
-              );
-              if (shouldNotify) {
-                  // ── Resolve org name via: joinResponseEventId → GetJoinResponse → joinPromptEventId → GetJoinPrompt → organizationId → GetOrganization ──
-                  let orgName = "";
-                  try {
-                    const joinResp = await apiCall("/organizations.v2.OrganizationJoinResponseService/GetJoinResponse", { joinResponseEventId: req.joinResponseEventId }, sessionId);
-                    const joinPrompt = await apiCall("/organizations.v2.OrganizationJoinPromptService/GetJoinPrompt", { joinPromptEventId: joinResp.joinPromptEventId }, sessionId);
-                    const orgData = await apiCall("/organizations.v2.OrganizationService/GetOrganization", { organizationId: joinPrompt.organizationId }, sessionId);
-                    orgName = orgData.name || "";
-                  } catch(e) { console.warn(`[Poller] org name lookup failed for reqId ${reqId}:`, e.message); }
-
-                  const orgLabel = orgName ? ` from "${orgName}"` : "";
-                  const msg = status === "accepted"
-                    ? `You have been accepted${orgLabel}. You are now a member!`
-                    : status === "retracted"
-                      ? `Your join request${orgLabel} was retracted.`
-                      : `You have been rejected${orgLabel}.`;
-                  addNotification({
-                    title: status === "accepted" ? "Request Approved ✅" : status === "retracted" ? "Request Retracted" : "Request Rejected ❌",
-                    body: msg,
-                    icon: status === "accepted" ? "✅" : "❌",
-                    time: new Date(),
-                    page: "organizations",
-                    boldName: orgName || undefined,
-                  });
-                  sendBrowserNotification(
-                    status === "accepted" ? "Request Approved" : status === "retracted" ? "Request Retracted" : "Request Rejected",
-                    msg
-                  );
-              }
-              // Only permanently skip if truly resolved — don't skip "retracted" on first sight
-              // since that's the backend's initial state for a pending request.
-              if (isResolved && !(status === "retracted" && prev === undefined)) {
-                resolvedReqIds.current.add(reqId);
-              }
-              prevJoinStatus.current[reqId] = status;
-            } catch(e) { console.warn(`[Poller] GetJoinRequest failed for reqId ${reqId}:`, e.message); }
-          }
-        } catch(e) { console.warn("[Poller] GetUserJoinRequests failed:", e.message); }
-
-        // ── 6. New events — only track org-shared calendars (not personal/owned) ──
-        try {
-          const calRes = await calApi("GetCalendars", {}, sessionId);
-          const calIds = (calRes.calendarIds || []).map(String);
-          for (const calId of calIds) {
-            try {
-              const cal = await calApi("GetCalendar", { calendarId: Number(calId) }, sessionId);
-              // Skip calendars owned by the current user — only notify for org-shared ones
-              if (String(cal.ownerUserId) === String(currentUser.id)) {
-                continue;
-              }
-              const evts = icalToEvents(cal.ical || "", calId);
-              const nonTaskEvts = evts.filter(e => !(e.title || "").startsWith("TASK:"));
-              const count = nonTaskEvts.length;
-              const prev  = prevEventCount.current[calId];
-              if (initialized.current && prev !== undefined && count > prev) {
-                const calName = cal.name || `Calendar #${calId}`;
-                const diff = count - prev;
-                const msg = `${diff} new event${diff > 1 ? "s" : ""} added to ${calName}.`;
-                addNotification({ title: "New Event 📅", body: msg, icon: "📅", time: new Date(), page: "calendar", boldName: calName });
-                sendBrowserNotification("New Event Added", msg);
-              }
-              prevEventCount.current[calId] = count;
-            } catch(e) { console.warn(`[Poller] GetCalendar failed for calId ${calId}:`, e.message); }
-          }
-        } catch(e) { console.warn("[Poller] GetCalendars failed:", e.message); }
-
-        initialized.current = true;
-      } catch(e) { console.error("[Poller] poll() top-level crash:", e.message, e); }
-      finally { isPolling = false; }
-    }
-
-    poll();
-    const interval = setInterval(poll, 3_000); // 33
-    return () => clearInterval(interval);
-  }, [sessionId, currentUser?.id]);
-}
-
-
-
-
 async function apiCall(endpoint, body = {}, sessionId = null) {
   const headers = { "Content-Type": "application/json" };
   if (sessionId) headers["Authorization"] = `Bearer ${sessionId}`;
@@ -612,27 +390,6 @@ function App() {
   const [sidebarOpen,   setSidebarOpen]  = useState(false);
   // ── Onboarding tutorial — true only for brand-new registrations ──
   const [showTutorial,    setShowTutorial]    = useState(false);
-  const [notifications, setNotifications] = useState(() => {
-  try {
-    const stored = localStorage.getItem("usc_notifications");
-    return stored ? JSON.parse(stored) : [];
-  } catch(e) { return []; }
-});
-  const [notifOpen,       setNotifOpen]        = useState(false);
-  const [notifUnread,     setNotifUnread]      = useState(0);
-
-  const addNotification = useCallback((notif) => {
-  setNotifications(prev => [notif, ...prev].slice(0, 30));
-  setNotifUnread(n => n + 1);
-}, []);
-
-useEffect(() => {
-  try {
-    localStorage.setItem("usc_notifications", JSON.stringify(notifications));
-  } catch(e) {}
-}, [notifications]);
-
-  useNotificationPoller(sessionId, currentUser, addNotification);
   const [theme,         setTheme]        = useState(() => {
     try { return localStorage.getItem("usc_theme") || "dark"; } catch(e) { return "dark"; }
   });
@@ -687,7 +444,6 @@ useEffect(() => {
     saveSession(sid);
     setCurrentUser(user);
     setSessionId(sid);
-    requestNotificationPermission();
     // Only fire tutorial if this is a new registration AND they haven't seen it
     if (isNewUser && !hasTutorialBeenSeen(user.id)) {
       setShowTutorial(true);
@@ -751,7 +507,6 @@ useEffect(() => {
     loadCalPrefs: () => loadCalPrefs(currentUser.id),
     saveCalPrefs: (obj) => saveCalPrefs(currentUser.id, obj),
     theme, toggleTheme,
-    notifications, setNotifications, notifOpen, setNotifOpen, notifUnread, setNotifUnread,
   };
 
   return (
@@ -947,26 +702,8 @@ function AuthPage({ onLogin }) {
             <div className="auth-hero-section-title">What is SchedU?</div>
             <p className="auth-hero-desc">
               A web-based scheduling and calendar management platform for students and organizations.
-              Create calendars, share events via access codes, track academic tasks — all in one place.
+              Create calendars, manage group schedules, and track academic tasks — all in one place.
             </p>
-          </div>
-
-          {/* Team */}
-          <div className="auth-hero-section">
-            <div className="auth-hero-section-title">Meet the Team</div>
-            <div className="auth-team-grid">
-              {team.map((m,i)=>(
-                <div key={i} className="auth-team-card">
-                  <div className="auth-team-avatar" style={{background:m.color}}>
-                    {m.name.split(" ").map(w=>w[0]).join("").slice(0,2)}
-                  </div>
-                  <div className="auth-team-info">
-                    <div className="auth-team-name">{m.name}</div>
-                    <div className="auth-team-role" style={{color:m.color}}>{m.role}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
 
           {/* Stack */}
@@ -980,8 +717,6 @@ function AuthPage({ onLogin }) {
           </div>
 
           <div className="auth-hero-footer" style={{ lineHeight:1.8 }}>
-            <span style={{ opacity:0.75, fontSize:"0.92em" }}>Instructor: Sir Paule Glenn Acuin</span><br />
-            <span style={{ opacity:0.75, fontSize:"0.92em" }}>CIS 1202 · Web Development I</span><br />
             University of San Carlos · DCISM · {new Date().getFullYear()}
           </div>
         </div>
@@ -1150,232 +885,15 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
   );
 }
 
-// ─── NOTIFICATION HELPERS ────────────────────────────────────────────────────
-// Renders notification body text with the boldName bolded wherever it appears.
-function NotifBody({ body, boldName, style }) {
-  if (!boldName || !body || !body.includes(boldName)) {
-    return <span style={style}>{body}</span>;
-  }
-  const parts = body.split(boldName);
-  return (
-    <span style={style}>
-      {parts.map((part, i) => (
-        <React.Fragment key={i}>
-          {part}
-          {i < parts.length - 1 && <strong style={{ color:"var(--text)", fontWeight:700 }}>{boldName}</strong>}
-        </React.Fragment>
-      ))}
-    </span>
-  );
-}
-
-// A single notification row — shared by dropdown and the View All modal.
-function NotifRow({ n, i, onNavigate, onDismiss, compact }) {
-  return (
-    <div
-      onClick={() => onNavigate(n)}
-      style={{
-        padding: compact ? "9px 14px" : "10px 16px",
-        borderBottom:"1px solid var(--border2)",
-        display:"flex", gap:10, alignItems:"flex-start",
-        cursor: (n.page || n.action) ? "pointer" : "default",
-        transition:"background 0.15s",
-      }}
-      onMouseEnter={e => { if (n.page || n.action) e.currentTarget.style.background = "var(--surface2)"; }}
-      onMouseLeave={e => { e.currentTarget.style.background = ""; }}
-    >
-      <span style={{ fontSize:18, flexShrink:0, marginTop:1 }}>{n.icon}</span>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", marginBottom:2 }}>{n.title}</div>
-        <NotifBody body={n.body} boldName={n.boldName} style={{ fontSize:11, color:"var(--text2)", lineHeight:1.5 }} />
-        <div style={{ fontSize:10, color:"var(--text3)", marginTop:3, display:"flex", gap:8, alignItems:"center" }}>
-          {n.time ? new Date(n.time).toLocaleTimeString("en-PH", { hour:"2-digit", minute:"2-digit" }) : ""}
-          {(n.page || n.action) && <span style={{ color:"var(--accent)", fontWeight:600 }}>{n.action === "open-join-requests" ? "View Now →" : "View →"}</span>}
-        </div>
-      </div>
-      {onDismiss && (
-        <button className="btn-icon" style={{ fontSize:11, color:"var(--text3)", flexShrink:0, marginTop:1 }}
-          onClick={e => { e.stopPropagation(); onDismiss(i); }}>
-          ✕
-        </button>
-      )}
-    </div>
-  );
-}
-
-// FFull-history modal — groups notifications into "Today" and "Earlier".
-function NotificationsModal({ notifications, setNotifications, setPage, onClose, setNotifOpen }) {
-  const today = new Date();
-  const todayNotifs = notifications.filter(n => {
-    if (!n.time) return false;
-    const d = new Date(n.time);
-    return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
-  });
-  const earlierNotifs = notifications.filter(n => !todayNotifs.includes(n));
-
-  function handleNavigate(n) {
-    onClose();
-    if (n.action === "open-join-requests" && n.orgId) {
-      setPage("organizations");
-      window.__pendingJoinRequestsOrgId = { orgId: n.orgId, orgName: n.orgName || null, orgType: n.orgType || null };
-      window.dispatchEvent(new CustomEvent("openJoinRequests", { detail: { orgId: n.orgId, orgName: n.orgName || null, orgType: n.orgType || null } }));
-    } else if (n.page) {
-      setPage(n.page);
-    }
-  }
-
-  function dismiss(globalIdx) {
-    setNotifications(prev => prev.filter((_, j) => j !== globalIdx));
-  }
-
-  function getGlobalIdx(n) {
-    return notifications.indexOf(n);
-  }
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-lg" style={{ maxWidth:480, maxHeight:"80vh", display:"flex", flexDirection:"column" }}
-        onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title">All Notifications</div>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            {notifications.length > 0 && (
-              <button className="btn-icon" style={{ fontSize:11, color:"var(--text3)" }}
-                onClick={() => setNotifications([])}>
-                Clear all
-              </button>
-            )}
-            <button className="close-btn" onClick={onClose}>✕</button>
-          </div>
-        </div>
-        <div style={{ flex:1, overflowY:"auto" }}>
-          {notifications.length === 0 ? (
-            <div style={{ padding:"48px 16px", textAlign:"center", color:"var(--text3)", fontSize:13 }}>
-              <div style={{ fontSize:32, marginBottom:10 }}>🔕</div>
-              No notifications yet
-            </div>
-          ) : (
-            <>
-              {todayNotifs.length > 0 && (
-                <>
-                  <div style={{ padding:"10px 16px 6px", fontSize:11, fontWeight:700, color:"var(--text3)", letterSpacing:.6, textTransform:"uppercase", borderBottom:"1px solid var(--border)" }}>Today</div>
-                  {todayNotifs.map((n) => (
-                    <NotifRow key={getGlobalIdx(n)} n={n} i={getGlobalIdx(n)} onNavigate={handleNavigate} onDismiss={dismiss} />
-                  ))}
-                </>
-              )}
-              {earlierNotifs.length > 0 && (
-                <>
-                  <div style={{ padding:"10px 16px 6px", fontSize:11, fontWeight:700, color:"var(--text3)", letterSpacing:.6, textTransform:"uppercase", borderBottom:"1px solid var(--border)" }}>Earlier</div>
-                  {earlierNotifs.map((n) => (
-                    <NotifRow key={getGlobalIdx(n)} n={n} i={getGlobalIdx(n)} onNavigate={handleNavigate} onDismiss={dismiss} />
-                  ))}
-                </>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── TOPBAR ───────────────────────────────────────────────────────────────────
 function Topbar({ page, ctx, setPage, onMenuClick }) {
   const titles = {dashboard:"Dashboard",calendar:"Calendar View",events:"Events List",calendars:"Manage Calendars",organizations:"Organizations",tasks:"Task Tracker",ai:"AI Tools",settings:"Settings",about:"About SchedU"};
-  const { dataLoading, refreshCalendars, theme, toggleTheme, notifications, notifOpen, setNotifOpen, notifUnread, setNotifUnread, setModal } = ctx;
-  const [viewAllOpen, setViewAllOpen] = React.useState(false);
-
-  function handleBellClick() {
-    setNotifOpen(o => !o);
-    if (!notifOpen) setNotifUnread(0);
-  }
-
-  function handleNavigate(n) {
-    setNotifOpen(false);
-    if (n.action === "open-join-requests" && n.orgId) {
-      setPage("organizations");
-      window.__pendingJoinRequestsOrgId = { orgId: n.orgId, orgName: n.orgName || null, orgType: n.orgType || null };
-      window.dispatchEvent(new CustomEvent("openJoinRequests", { detail: { orgId: n.orgId, orgName: n.orgName || null, orgType: n.orgType || null } }));
-    } else if (n.page) {
-      setPage(n.page);
-    }
-  }
+  const { dataLoading, refreshCalendars, theme, toggleTheme } = ctx;
 
   return (
     <div className="topbar" style={{ position:"relative" }}>
       <button className="hamburger" onClick={onMenuClick}>☰</button>
       <div className="topbar-title font-head">{titles[page]||page}</div>
-
-      {/* Notification bell */}
-      <div style={{ position:"relative", display:"inline-flex" }}>
-        <button className="btn-icon" title="Notifications" onClick={handleBellClick} style={{ fontSize:16, position:"relative" }}>
-          🔔
-          {notifUnread > 0 && (
-            <span style={{
-              position:"absolute", top:2, right:2, width:8, height:8,
-              borderRadius:"50%", background:"#ef4444",
-              border:"1.5px solid var(--bg)",
-            }} />
-          )}
-        </button>
-
-        {/* Dropdown */}
-        {notifOpen && (
-          <div style={{
-            position:"absolute", top:"calc(100% + 8px)", right:0, width:300,
-            background:"var(--surface)", border:"1.5px solid var(--border)",
-            borderRadius:12, boxShadow:"0 8px 32px rgba(0,0,0,0.25)",
-            zIndex:9999, overflow:"hidden",
-          }}
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div style={{ padding:"12px 16px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-              <span style={{ fontWeight:700, fontSize:13, color:"var(--text)" }}>Notifications</span>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                {notifications.length > 0 && (
-                  <>
-                    <button className="btn-icon" style={{ fontSize:11, color:"var(--accent)", fontWeight:600 }}
-                      onClick={() => { setNotifOpen(false); setViewAllOpen(true); }}>
-                      View all
-                    </button>
-                    <button className="btn-icon" style={{ fontSize:11, color:"var(--text3)" }}
-                      onClick={() => ctx.setNotifications([])}>
-                      Clear all
-                    </button>
-                  </>
-                )}
-                <button className="btn-icon" style={{ fontSize:11 }} onClick={() => setNotifOpen(false)}>✕</button>
-              </div>
-            </div>
-
-            {/* List — capped at 5 in dropdown */}
-            <div style={{ maxHeight:320, overflowY:"auto" }}>
-              {notifications.length === 0 ? (
-                <div style={{ padding:"32px 16px", textAlign:"center", color:"var(--text3)", fontSize:13 }}>
-                  <div style={{ fontSize:24, marginBottom:8 }}>🔕</div>
-                  No notifications yet
-                </div>
-              ) : notifications.slice(0, 5).map((n, i) => (
-                <NotifRow key={i} n={n} i={i} onNavigate={handleNavigate}
-                  onDismiss={(idx) => ctx.setNotifications(prev => prev.filter((_, j) => j !== idx))}
-                  compact />
-              ))}
-              {notifications.length > 5 && (
-                <div
-                  onClick={() => { setNotifOpen(false); setViewAllOpen(true); }}
-                  style={{ padding:"10px 16px", textAlign:"center", fontSize:12, color:"var(--accent)", fontWeight:600, cursor:"pointer", borderTop:"1px solid var(--border2)" }}
-                  onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"}
-                  onMouseLeave={e => e.currentTarget.style.background = ""}
-                >
-                  View all {notifications.length} notifications →
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
 
       <button className="theme-toggle" title={theme==="dark"?"Switch to Light Mode":"Switch to Dark Mode"} onClick={toggleTheme}>
         {theme==="dark" ? "☀️" : "🌙"}
@@ -1383,20 +901,10 @@ function Topbar({ page, ctx, setPage, onMenuClick }) {
       <button className="btn-icon" title="Refresh" onClick={refreshCalendars} style={{fontSize:13}} data-tutorial="topbar-refresh">
         {dataLoading?"⟳":"↻"}
       </button>
-
-      {/* View All modal */}
-      {viewAllOpen && (
-        <NotificationsModal
-          notifications={notifications}
-          setNotifications={ctx.setNotifications}
-          setPage={setPage}
-          onClose={() => setViewAllOpen(false)}
-          setNotifOpen={setNotifOpen}
-        />
-      )}
     </div>
   );
 }
+
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function Dashboard({ ctx, setPage }) {
@@ -1800,11 +1308,6 @@ function ModalRouter({ modal, ctx }) {
   if(type==="manage-calendar")  return <ManageCalendarModal  ctx={ctx} calendar={data} />;
   if(type==="day-events")       return <DayEventsModal       ctx={ctx} date={data.date} />;
   if(type==="create-group")      return <CreateGroupModal      ctx={ctx} />;
-  // Legacy course modal routes — redirect to new group modals
-  if(type==="create-course")     return <CreateGroupModal      ctx={ctx} />;
-  if(type==="manage-course")     return <ManageOrgModal        ctx={ctx} orgId={data.courseId} org={{...data.course, type:"study-hub"}} />;
-  if(type==="course-detail")     return <OrgDetailModal        ctx={ctx} orgId={data.courseId} org={{...data.course, type:"study-hub"}} />;
-  if(type==="course-members")    return <OrgMembersModal       ctx={ctx} orgId={data.courseId} org={{...data.course, type:"study-hub"}} />;
   if(type==="create-org")        return <CreateGroupModal       ctx={ctx} />;
   if(type==="manage-org")       return <ManageOrgModal       ctx={ctx} orgId={data.orgId} org={data.org} initialSection={data.initialSection} />;
   if(type==="join-prompt")      return <JoinPromptModal      ctx={ctx} orgId={data.orgId} org={data.org} prompt={data.prompt} />;

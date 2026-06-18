@@ -1,25 +1,16 @@
 // ============================================================
-//  organizations.jsx — Unified Organizations + Study Hub
+//  organizations.jsx — Organizations
 //
 //  Components:
-//    OrganizationsTab         — browse all groups (orgs + study hubs), join/leave, create
-//    CreateGroupModal         — create a new org or study hub (with group type label)
+//    OrganizationsTab         — browse all orgs, join/leave, create
+//    CreateGroupModal         — create a new organization
 //    ManageOrgModal           — owner: push calendars, update settings, manage labels
 //    OrgDetailModal           — member: view shared calendars
 //    OrgMembersModal          — view member list
 //    JoinPromptModal          — questionnaire for orgs that require approval
 //
-//  Key changes vs old files:
-//    • "Study Hub" nav tab removed — merged into Organizations
-//    • Three sub-tabs: Browse | My Orgs | My Subjects
-//    • Group type label: "organization" or "study-hub" stored in description prefix
-//      Format: ORG:[type]|[genre?] description
-//      e.g. "ORG:[organization] CS Society"  or  "ORG:[study-hub][SAS] Intro to CS"
-//    • All study-hub genre labels (SAS, SAFAD, etc.) work in organizations too
-//    • Label filtering available in all three sub-tabs
-//    • "My Subjects" tab shows only study-hub type groups the user has joined
-//    • "My Orgs" tab shows only organization type groups the user has joined
-//    • Browse shows all, filterable by type + genre labels
+//  Group description format: ORG:[organization][genre?] description
+//      e.g. "ORG:[organization][SAS] CS Society"
 //
 //  API base: /organizations.v2.<Service>/<Method>
 //  Requires: app.jsx loaded first (apiCall, PALETTE, fmtDate,
@@ -83,17 +74,17 @@ function parseGroupDesc(rawDesc) {
   const newMatch = rawDesc.match(/^ORG:\[([^\]]+)\](?:\[([^\]]*)\])?\s*(.*)/s);
   if (newMatch) {
     return {
-      type:        newMatch[1] || "organization",
+      type:        "organization",
       genre:       newMatch[2] || null,
       description: newMatch[3] || "",
     };
   }
 
-  // Legacy study-hub format: COURSE:[genre] description
+  // Legacy study-hub format: COURSE:[genre] description — treat as organization now
   const courseMatch = rawDesc.match(/^COURSE:\[([^\]]*)\]\s*(.*)/s);
   if (courseMatch) {
     return {
-      type:        "study-hub",
+      type:        "organization",
       genre:       courseMatch[1] || "Other",
       description: courseMatch[2] || "",
     };
@@ -120,15 +111,12 @@ function genreColor(genre) { return GENRE_COLORS[genre] || "var(--text3)"; }
 
 const GROUP_TYPE_COLORS = {
   "organization": "var(--accent)",
-  "study-hub":    "var(--green)",
 };
 const GROUP_TYPE_LABELS = {
   "organization": "Organization",
-  "study-hub":    "Study Hub",
 };
 const GROUP_TYPE_ICONS = {
   "organization": "🏛",
-  "study-hub":    "🎓",
 };
 
 // ─── AVATAR HELPERS ───────────────────────────────────────────────────────────
@@ -184,8 +172,9 @@ function OrganizationsTab({ ctx }) {
   const [joinLoading,   setJoinLoading]   = React.useState(null);
   const [leaveLoading,  setLeaveLoading]  = React.useState(null);
   const [search,        setSearch]        = React.useState("");
-  const [subTab,        setSubTab]        = React.useState("browse"); // "browse"|"mine"|"subjects"
-  const [typeFilter,    setTypeFilter]    = React.useState("all");    // "all"|"organization"|"study-hub"
+  const [subTab,        setSubTab]        = React.useState("browse"); // "browse"|"mine"
+
+
   const [genreFilter,   setGenreFilter]   = React.useState("All");
   const [refreshKey,    setRefreshKey]    = React.useState(0);
   const [confirmDlg,    setConfirmDlg]    = React.useState(null);
@@ -397,7 +386,7 @@ function OrganizationsTab({ ctx }) {
     });
   }
 
-  // ── Filter logic
+// ── Filter logic
   const filteredOrgs = allOrgs.filter(id => {
     const d = orgDetails[id];
     if (!d) return false;
@@ -405,30 +394,22 @@ function OrganizationsTab({ ctx }) {
     const isMember = !!membershipMap[id];
 
     if (subTab === "mine") {
-      // My Orgs: only joined organizations (not study-hubs), with genre filter
-      if (!isMember || d.type !== "organization") return false;
+      // My Orgs: only joined organizations, with genre filter
+      if (!isMember) return false;
       return genreFilter === "All" || d.genre === genreFilter;
     }
-    if (subTab === "subjects") {
-      // My Subjects: only joined study-hubs
-      if (!isMember || d.type !== "study-hub") return false;
-      const matchesGenre = genreFilter === "All" || d.genre === genreFilter;
-      return matchesGenre;
-    }
 
-    // Browse: filter by search, type, genre
+    // Browse: filter by search, genre
     const q = search.toLowerCase();
     const matchesSearch = !q || d.name?.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q) || d.genre?.toLowerCase().includes(q);
-    const matchesType   = typeFilter === "all" || d.type === typeFilter;
     const matchesGenre  = genreFilter === "All" || d.genre === genreFilter;
 
-    return matchesSearch && matchesType && matchesGenre;
+    return matchesSearch && matchesGenre;
   });
 
-  const myOrgCount      = allOrgs.filter(id => (!!membershipMap[id]) && orgDetails[id]?.type === "organization").length;
-  const mySubjectCount  = allOrgs.filter(id => (!!membershipMap[id]) && orgDetails[id]?.type === "study-hub").length;
+  const myOrgCount = allOrgs.filter(id => !!membershipMap[id]).length;
 
-  const showGenreFilter = true; // genre/dept filter available in all tabs
+  const showGenreFilter = true; // genre/dept filter available in both tabs
 
   return (
     <div>
@@ -438,9 +419,8 @@ function OrganizationsTab({ ctx }) {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:10 }}>
         <div style={{ display:"flex", gap:0, background:"var(--surface2)", borderRadius:10, padding:3, border:"1px solid var(--border)" }}>
           {[
-            ["browse",   "🌐 Browse"],
-            ["mine",     `🏛 My Orgs${myOrgCount     ? ` (${myOrgCount})`     : ""}`],
-            ["subjects", `🎓 My Subjects${mySubjectCount ? ` (${mySubjectCount})` : ""}`],
+            ["browse", "🌐 Browse"],
+            ["mine",   `🏛 My Orgs${myOrgCount ? ` (${myOrgCount})` : ""}`],
           ].map(([t, l]) => (
             <div key={t} onClick={() => { setSubTab(t); setGenreFilter("All"); }}
               style={{
@@ -470,21 +450,6 @@ function OrganizationsTab({ ctx }) {
               onChange={e => setSearch(e.target.value)}
               style={{ maxWidth:280 }}
             />
-            {/* Type filter */}
-            <div style={{ display:"flex", gap:6 }}>
-              {[["all","All Types"],["organization","🏛 Organizations"],["study-hub","🎓 Study Hubs"]].map(([v, l]) => (
-                <div key={v} onClick={() => { setTypeFilter(v); setGenreFilter("All"); }}
-                  style={{
-                    padding:"5px 13px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer",
-                    border:`1.5px solid ${typeFilter===v ? "var(--accent)" : "var(--border)"}`,
-                    background: typeFilter===v ? "var(--accent)" : "transparent",
-                    color: typeFilter===v ? "#fff" : "var(--text3)",
-                    transition:"all .15s",
-                  }}>
-                  {l}
-                </div>
-              ))}
-            </div>
           </div>
           {/* Dept filter — all group types */}
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
@@ -505,8 +470,8 @@ function OrganizationsTab({ ctx }) {
         </div>
       )}
 
-      {/* ── My Orgs / My Subjects genre filter */}
-      {(subTab === "mine" || subTab === "subjects") && (
+      {/* ── My Orgs genre filter */}
+      {subTab === "mine" && (
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", marginBottom:14 }}>
           <span style={{ fontSize:11, color:"var(--text3)", fontWeight:600, textTransform:"uppercase", letterSpacing:1 }}>Dept:</span>
           {GENRES.map(g => (
@@ -536,9 +501,7 @@ function OrganizationsTab({ ctx }) {
         <div className="cards-grid">
           {filteredOrgs.length === 0 && (
             <div style={{ gridColumn:"1/-1", textAlign:"center", padding:"40px 0", color:"var(--text3)", fontSize:13 }}>
-              {subTab === "mine"     ? "You haven't joined any organizations yet." :
-               subTab === "subjects" ? "You haven't enrolled in any study hubs yet." :
-               "No groups found."}
+              {subTab === "mine" ? "You haven't joined any organizations yet." : "No groups found."}
             </div>
           )}
 
@@ -550,7 +513,6 @@ function OrganizationsTab({ ctx }) {
             const isAdmin    = membershipMap[id] === "admin";
             const col        = orgColor(id);
             const initials   = orgInitials(org.name);
-            const isStudyHub = org.type === "study-hub";
             const gc         = org.genre ? genreColor(org.genre) : "var(--text3)";
             const typeCol    = GROUP_TYPE_COLORS[org.type] || "var(--accent)";
             const isJoining  = joinLoading  === id;
@@ -592,7 +554,7 @@ function OrganizationsTab({ ctx }) {
                       )}
                       {joined && !owned && !isAdmin && (
                         <span style={{ fontSize:10, padding:"2px 7px", borderRadius:4, background:"rgba(52,211,153,0.15)", color:"var(--green)", fontWeight:700, border:"1px solid rgba(52,211,153,0.3)" }}>
-                          {isStudyHub ? "Enrolled" : "Member"}
+                          Member
                         </span>
                       )}
                       {isAdmin && (
@@ -643,7 +605,7 @@ function OrganizationsTab({ ctx }) {
                     <button className="btn btn-primary btn-sm"
                       onClick={() => handleJoin(id)}
                       disabled={isJoining}>
-                      {isJoining ? "Joining…" : isStudyHub ? "Enroll" : "Join"}
+                      {isJoining ? "Joining…" : "Join"}
                     </button>
                   )}
                   {joined && !owned && (
@@ -692,8 +654,6 @@ function CreateGroupModal({ ctx }) {
   const [error, setError]     = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
-  const isStudyHub = form.type === "study-hub";
-
   async function submit() {
     if (!form.name.trim()) { setError("Name is required."); return; }
     setLoading(true); setError("");
@@ -727,45 +687,18 @@ function CreateGroupModal({ ctx }) {
     <div className="modal-overlay" onClick={closeModal}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">
-            {isStudyHub ? "🎓 Create Study Hub" : "🏛 Create Organization"}
-          </div>
+          <div className="modal-title">🏛 Create Organization</div>
           <button className="close-btn" onClick={closeModal}>✕</button>
         </div>
         <div className="modal-body">
           {error && <div className="error-msg">{error}</div>}
 
-          {/* Group type selector */}
           <div className="form-group">
-            <label className="form-label">Group Type *</label>
-            <div style={{ display:"flex", gap:8 }}>
-              {[["organization","🏛 Organization"],["study-hub","🎓 Study Hub"]].map(([v, l]) => (
-                <div key={v}
-                  onClick={() => setForm(f => ({ ...f, type:v }))}
-                  style={{
-                    flex:1, padding:"10px 14px", borderRadius:10, cursor:"pointer", textAlign:"center",
-                    fontWeight:600, fontSize:13, transition:"all .15s",
-                    border:`2px solid ${form.type===v ? GROUP_TYPE_COLORS[v] : "var(--border)"}`,
-                    background: form.type===v ? GROUP_TYPE_COLORS[v]+"18" : "var(--surface2)",
-                    color: form.type===v ? GROUP_TYPE_COLORS[v] : "var(--text2)",
-                  }}>
-                  {l}
-                </div>
-              ))}
-            </div>
-            <div style={{ fontSize:12, color:"var(--text3)", marginTop:6 }}>
-              {isStudyHub
-                ? "Study Hubs are for academic courses and subjects."
-                : "Organizations are for clubs, societies, and groups."}
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">{isStudyHub ? "Course Name" : "Organization Name"} *</label>
+            <label className="form-label">Organization Name *</label>
             <input className="form-input"
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name:e.target.value }))}
-              placeholder={isStudyHub ? "e.g. Introduction to Computer Science" : "e.g. USC Computer Science Society"} />
+              placeholder="e.g. USC Computer Science Society" />
           </div>
 
           <div className="form-group">
@@ -775,7 +708,7 @@ function CreateGroupModal({ ctx }) {
             <input className="form-input"
               value={form.description}
               onChange={e => setForm(f => ({ ...f, description:e.target.value }))}
-              placeholder={isStudyHub ? "What is this course about?" : "What is this organization for?"} />
+              placeholder="What is this organization for?" />
           </div>
 
           {/* Genre selector — both organizations and study hubs */}
@@ -793,7 +726,7 @@ function CreateGroupModal({ ctx }) {
             </div>
           </div>
 
-          {/* Requires approval (organizations can have it; study hubs usually don't) */}
+          {/* Requires approval */}
           <div className="form-group" style={{ marginTop:4 }}>
             <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", fontSize:14 }}>
               <input
@@ -814,7 +747,7 @@ function CreateGroupModal({ ctx }) {
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={closeModal}>Cancel</button>
           <button className="btn btn-primary" onClick={submit} disabled={loading}>
-            {loading ? "Creating…" : `Create ${isStudyHub ? "Study Hub" : "Organization"}`}
+            {loading ? "Creating…" : "Create Organization"}
           </button>
         </div>
       </div>
@@ -826,7 +759,6 @@ function CreateGroupModal({ ctx }) {
 function ManageOrgModal({ ctx, orgId, org, initialSection }) {
   const { sessionId, closeModal, showToast, myCalendars, currentUser } = ctx;
 
-  const isStudyHub = org.type === "study-hub";
 
   const [name,        setName]        = React.useState(org.name || "");
   const [description, setDescription] = React.useState(org.description || "");
@@ -1616,7 +1548,6 @@ function OrgDetailModal({ ctx, orgId, org }) {
   const [membersLoading, setMembersLoading] = React.useState(true);
   const [activeSection,  setActiveSection]  = React.useState("calendars");
   const col = orgColor(orgId);
-  const isStudyHub = org.type === "study-hub";
 
   async function loadCals() {
     setLoading(true);
@@ -1759,7 +1690,6 @@ function OrgMembersModal({ ctx, orgId, org }) {
   const [members, setMembers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const col = orgColor(orgId);
-  const isStudyHub = org.type === "study-hub";
 
   React.useEffect(() => {
     (async () => {
