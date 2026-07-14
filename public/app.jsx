@@ -938,11 +938,11 @@ function Dashboard({ ctx, setPage }) {
       </div>
       <div className="stats-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20}}>
         {[
-          {label:"Calendars",value:cals.length,icon:"📚",color:"var(--accent2)"},
-          {label:"Today",value:todayEvts.length,icon:"📅",color:"var(--green)"},
-          {label:"Tasks",value:tasks.length,icon:"✅",color:"var(--accent)"},
+          {label:"Calendars",value:cals.length,icon:"📚",color:"var(--accent2)",page:"calendars"},
+          {label:"Calendar View",value:todayEvts.length,icon:"📅",color:"var(--green)",page:"calendar"},
+          {label:"Tasks",value:tasks.length,icon:"✅",color:"var(--accent)",page:"tasks"},
         ].map(s=>(
-          <div key={s.label} className="card" style={{cursor:"default",padding:"14px"}}>
+          <div key={s.label} className="card" onClick={()=>setPage(s.page)} style={{cursor:"pointer",padding:"14px"}}>
             <div style={{fontSize:20,marginBottom:4}}>{s.icon}</div>
             <div style={{fontFamily:"Syne,sans-serif",fontSize:24,fontWeight:800,color:s.color,marginBottom:2}}>{s.value}</div>
             <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,textTransform:"uppercase",letterSpacing:".6px"}}>{s.label}</div>

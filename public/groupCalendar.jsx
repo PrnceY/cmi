@@ -149,17 +149,18 @@ filtered.forEach(cal => {
       {tab !== "all" && (
         <div className="tabs" style={{ marginTop: 8 }}>
           {[
-            ["all",          "All Labels"],
-            ["organization", "🏢 Organization"],
-            ["subject",      "📚 Subject"],
-            ["personal",     "👤 Personal"],
-          ].map(([v, l]) => (
+            ["all",          null,      "All Labels"],
+            ["organization", Building2, "Organization"],
+            ["subject",      BookOpen,  "Subject"],
+            ["personal",     User,      "Personal"],
+          ].map(([v, Icon, l]) => (
             <div
               key={v}
               className={`tab${labelFilter === v ? " active" : ""}`}
               style={{ fontSize: 12 }}
               onClick={() => setLabelFilter(v)}
             >
+              {Icon && <Icon size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />}
               {l}
             </div>
           ))}
@@ -383,9 +384,9 @@ filtered.forEach(cal => {
                     }}
                   >
                     <option value="none">None</option>
-                    <option value="organization">🏢 Organization</option>
-                    <option value="subject">📚 Subject</option>
-                    <option value="personal">👤 Personal</option>
+                    <option value="organization">Organization</option>
+                    <option value="subject">Subject</option>
+                    <option value="personal">Personal</option>
                   </select>
                 </div>
 
@@ -509,7 +510,7 @@ function CreateCalendarModal({ ctx }) {
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">Create Calendar</div>
-          <button className="close-btn" onClick={closeModal}>✕</button>
+          <button className="close-btn" onClick={closeModal}><X size={16} /></button>
         </div>
         <div className="modal-body">
           {error && <div className="error-msg">{error}</div>}

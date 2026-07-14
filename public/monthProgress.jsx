@@ -89,7 +89,8 @@ function MonthProgressBar({ year, month, allEvts }) {
               padding: "2px 10px",
             }}
           >
-            ✅ Completed
+            <CheckCircle size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+            Completed
           </span>
         ) : (
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)" }}>

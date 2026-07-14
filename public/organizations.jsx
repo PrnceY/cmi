@@ -1315,7 +1315,9 @@ function ManageOrgModal({ ctx, orgId, org, initialSection }) {
                               className="btn btn-sm btn-ghost"
                               style={{ fontSize:11, padding:"3px 9px", color: isAdmin ? "var(--text2)" : "var(--green)", border:`1px solid ${isAdmin ? "var(--border)" : "rgba(52,211,153,0.4)"}` }}
                               onClick={() => {
-                                const newRole = isAdmin ? "member" : "admin";
+                                const isPromoting = !isAdmin;
+                                const apiRole = isPromoting ? "admin" : "user"; // backend ENUM only accepts 'owner'|'admin'|'user'
+                                const newRole = isPromoting ? "admin" : "member";
                                 setConfirmDlg({
                                   message: isAdmin ? `Demote ${m.name}?` : `Promote ${m.name} to Admin?`,
                                   description: isAdmin
@@ -1324,8 +1326,8 @@ function ManageOrgModal({ ctx, orgId, org, initialSection }) {
                                   confirmLabel: isAdmin ? "Demote" : "Promote",
                                   onConfirm: async () => {
                                     try {
-                                      await orgRoleApi("SetMemberRole", { organizationId: Number(orgId), memberUserId: m.id, role: newRole }, sessionId);
-                                      showToast(`${m.name} is now ${newRole === "admin" ? "an Admin" : "a Member"}.`);
+                                      await orgRoleApi("SetMemberRole", { organizationId: Number(orgId), memberUserId: m.id, role: apiRole }, sessionId);
+                                      showToast(`${m.name} is now ${isPromoting ? "an Admin" : "a Member"}.`);
                                       setMembers(prev => prev.map(x => x.id === m.id ? { ...x, role: newRole } : x));
                                     } catch(e) { showToast(e.message || "Failed to update role.", "error"); }
                                   },
@@ -1409,24 +1411,7 @@ function ManageOrgModal({ ctx, orgId, org, initialSection }) {
             <div>
               {error && <div className="error-msg">{error}</div>}
 
-              {/* Group type toggle */}
-              <div className="form-group">
-                <label className="form-label">Group Type</label>
-                <div style={{ display:"flex", gap:8 }}>
-                  {[["organization","🏛 Organization"],["study-hub","🎓 Study Hub"]].map(([v,l]) => (
-                    <div key={v} onClick={() => setGroupType(v)}
-                      style={{
-                        flex:1, padding:"8px 12px", borderRadius:10, cursor:"pointer", textAlign:"center",
-                        fontWeight:600, fontSize:13, transition:"all .15s",
-                        border:`2px solid ${groupType===v ? GROUP_TYPE_COLORS[v] : "var(--border)"}`,
-                        background: groupType===v ? GROUP_TYPE_COLORS[v]+"18" : "var(--surface2)",
-                        color: groupType===v ? GROUP_TYPE_COLORS[v] : "var(--text2)",
-                      }}>
-                      {l}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              {/* Group type toggle removed — Study Hub feature retired, groupType stays whatever org.type already is (used by encodeGroupDesc on save) */}
 
               <div className="form-group">
                 <label className="form-label">Name *</label>
