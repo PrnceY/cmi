@@ -689,8 +689,8 @@ function AuthPage({ onLogin }) {
 
           {/* Feature pills */}
           <div className="auth-hero-pills">
-            {[["📅","Calendar Sharing","#6c63ff"],["📝","Task Tracking","#34d399"],["👥","Group Calendars","#60a5fa"],["✨","AI Tools","#2dd4bf"]].map(([ic,lbl,c])=>(
-              <span key={lbl} className="auth-pill" style={{"--pill-color":c}}>{ic} {lbl}</span>
+            {[[Calendar,"Calendar Sharing","#6c63ff"],[ClipboardList,"Task Tracking","#34d399"],[Users,"Group Calendars","#60a5fa"],[Sparkles,"AI Tools","#2dd4bf"]].map(([Ic,lbl,c])=>(
+              <span key={lbl} className="auth-pill" style={{"--pill-color":c, display:"inline-flex", alignItems:"center", gap:6}}><Ic size={14} /> {lbl}</span>
             ))}
           </div>
 
@@ -798,20 +798,20 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
 
   const navGroups = [
     { label: "MAIN", items: [
-      {id:"dashboard",     icon:"⊞",  label:"Dashboard"},
+      {id:"dashboard",     icon:LayoutDashboard, label:"Dashboard"},
     ]},
     { label: "SCHEDULE", items: [
-      {id:"calendar",      icon:"📅", label:"Calendar View"},
-      {id:"events",        icon:"🗓",  label:"Events List"},
-      {id:"calendars",     icon:"📚", label:"Manage Calendars"},
+      {id:"calendar",      icon:Calendar,      label:"Calendar View"},
+      {id:"events",        icon:CalendarDays,  label:"Events List"},
+      {id:"calendars",     icon:BookOpen,      label:"Manage Calendars"},
     ]},
     { label: "WORKSPACE", items: [
-      {id:"organizations", icon:"🏛",  label:"Organizations"},
-      {id:"tasks",         icon:"📝", label:"Task Tracker"},
-      {id:"ai",            icon:"✨", label:"AI Tools"},
+      {id:"organizations", icon:Landmark,      label:"Organizations"},
+      {id:"tasks",         icon:ClipboardList, label:"Task Tracker"},
+      {id:"ai",            icon:Sparkles,      label:"AI Tools"},
     ]},
     { label: "ACCOUNT", items: [
-      {id:"settings",      icon:"⚙️", label:"Settings"},
+      {id:"settings",      icon:Settings, label:"Settings"},
     ]},
   ];
   const navItems = navGroups.flatMap(g => g.items);
@@ -821,7 +821,7 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
       {/* Logo / collapse toggle */}
       <div className="sidebar-logo" style={{ justifyContent: collapsed ? "center" : "flex-start", padding: collapsed ? "24px 0" : undefined }}>
         {collapsed
-          ? <span title="Expand sidebar" style={{ cursor:"pointer", fontSize:20 }} onClick={() => setCollapsed(false)}>▶</span>
+          ? <span title="Expand sidebar" style={{ cursor:"pointer", display:"inline-flex" }} onClick={() => setCollapsed(false)}><ChevronRight size={18} /></span>
           : <><span className="logo-sched">Sched</span><span className="logo-u">U</span></>
         }
       </div>
@@ -854,7 +854,7 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
                 data-tutorial={`nav-${item.id}`}
                 title={collapsed ? item.label : undefined}
               >
-                <span style={{ fontSize: 18 }}>{item.icon}</span>
+                <span style={{ display:"inline-flex" }}><item.icon size={18} /></span>
                 {!collapsed && <span style={{ flex: 1 }}>{item.label}</span>}
               </div>
             ))}
@@ -871,14 +871,14 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
         style={{ display:"flex", justifyContent: collapsed ? "center" : "flex-end",
           padding: collapsed ? "4px 0" : "0 4px 6px", cursor:"pointer" }}
       >
-        <span style={{ fontSize:12, color:"var(--text3)", opacity:0.45, transition:"var(--transition)" }}
+        <span style={{ display:"inline-flex", color:"var(--text3)", opacity:0.45, transition:"var(--transition)" }}
           onMouseEnter={e => e.currentTarget.style.opacity = "1"}
           onMouseLeave={e => e.currentTarget.style.opacity = "0.45"}
-        >{collapsed ? "▶" : "◀"}</span>
+        >{collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</span>
       </div>
         {collapsed
-          ? <div title="Sign Out" style={{ textAlign:"center", cursor:"pointer", fontSize:18, color:"var(--text3)", padding:"6px 0" }} onClick={() => handleLogout()}>⏻</div>
-          : <button className="btn btn-ghost btn-sm w-full" onClick={() => handleLogout()}>← Sign Out</button>
+          ? <div title="Sign Out" style={{ display:"flex", justifyContent:"center", cursor:"pointer", color:"var(--text3)", padding:"6px 0" }} onClick={() => handleLogout()}><LogOut size={18} /></div>
+          : <button className="btn btn-ghost btn-sm w-full" onClick={() => handleLogout()} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}><LogOut size={14} /> Sign Out</button>
         }
       </div>
     </div>
@@ -892,14 +892,14 @@ function Topbar({ page, ctx, setPage, onMenuClick }) {
 
   return (
     <div className="topbar" style={{ position:"relative" }}>
-      <button className="hamburger" onClick={onMenuClick}>☰</button>
+      <button className="hamburger" onClick={onMenuClick} style={{ display:"inline-flex" }}><Menu size={20} /></button>
       <div className="topbar-title font-head">{titles[page]||page}</div>
 
-      <button className="theme-toggle" title={theme==="dark"?"Switch to Light Mode":"Switch to Dark Mode"} onClick={toggleTheme}>
-        {theme==="dark" ? "☀️" : "🌙"}
+      <button className="theme-toggle" title={theme==="dark"?"Switch to Light Mode":"Switch to Dark Mode"} onClick={toggleTheme} style={{ display:"inline-flex" }}>
+        {theme==="dark" ? <Sun size={16} /> : <Moon size={16} />}
       </button>
-      <button className="btn-icon" title="Refresh" onClick={refreshCalendars} style={{fontSize:13}} data-tutorial="topbar-refresh">
-        {dataLoading?"⟳":"↻"}
+      <button className="btn-icon" title="Refresh" onClick={refreshCalendars} style={{ display:"inline-flex" }} data-tutorial="topbar-refresh">
+        <RefreshCw size={14} />
       </button>
     </div>
   );
@@ -932,18 +932,19 @@ function Dashboard({ ctx, setPage }) {
           data-tutorial="dashboard-greeting"
           style={{fontFamily:"Syne,sans-serif",fontSize:22,fontWeight:800,marginBottom:4}}
         >
-          Good {today.getHours()<12?"morning":today.getHours()<17?"afternoon":"evening"}, {currentUser.first_name || currentUser.name.split(" ")[0]}! 👋
+          Good {today.getHours()<12?"morning":today.getHours()<17?"afternoon":"evening"}, {currentUser.first_name || currentUser.name.split(" ")[0]}!{" "}
+          <Sparkles size={16} style={{ display:"inline", verticalAlign:"-2px", color:"var(--accent2)" }} />
         </div>
         <div style={{color:"var(--text2)",fontSize:13}}>{today.toLocaleDateString("en-PH",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
       </div>
       <div className="stats-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20}}>
         {[
-          {label:"Calendars",value:cals.length,icon:"📚",color:"var(--accent2)",page:"calendars"},
-          {label:"Calendar View",value:todayEvts.length,icon:"📅",color:"var(--green)",page:"calendar"},
-          {label:"Tasks",value:tasks.length,icon:"✅",color:"var(--accent)",page:"tasks"},
+          {label:"Calendars",value:cals.length,icon:BookOpen,color:"var(--accent2)",page:"calendars"},
+          {label:"Calendar View",value:todayEvts.length,icon:Calendar,color:"var(--green)",page:"calendar"},
+          {label:"Tasks",value:tasks.length,icon:CheckCircle,color:"var(--accent)",page:"tasks"},
         ].map(s=>(
           <div key={s.label} className="card" onClick={()=>setPage(s.page)} style={{cursor:"pointer",padding:"14px"}}>
-            <div style={{fontSize:20,marginBottom:4}}>{s.icon}</div>
+            <div style={{marginBottom:4,color:s.color}}><s.icon size={20} /></div>
             <div style={{fontFamily:"Syne,sans-serif",fontSize:24,fontWeight:800,color:s.color,marginBottom:2}}>{s.value}</div>
             <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,textTransform:"uppercase",letterSpacing:".6px"}}>{s.label}</div>
           </div>
@@ -957,7 +958,7 @@ function Dashboard({ ctx, setPage }) {
             <button className="btn btn-ghost btn-sm" onClick={()=>setPage("calendar")}>View Cal</button>
           </div>
           {todayEvts.length===0
-            ?<div className="empty-state" style={{padding:"24px 10px"}}><div className="empty-icon" style={{fontSize:32}}>✨</div><div style={{fontSize:13,color:"var(--text3)"}}>No events today!</div></div>
+            ?<div className="empty-state" style={{padding:"24px 10px"}}><div className="empty-icon" style={{display:"flex",justifyContent:"center"}}><Sparkles size={32} /></div><div style={{fontSize:13,color:"var(--text3)"}}>No events today!</div></div>
             :todayEvts.map(e=><EventListItem key={e.id} event={e} ctx={ctx} />)}
           <div className="divider" />
           <button className="btn btn-ghost btn-sm w-full" onClick={()=>setModal({type:"create-event"})}>+ Add Event</button>
@@ -1113,7 +1114,7 @@ function SettingsPage({ ctx }) {
               <div>
                 <div style={{fontWeight:700,fontSize:16}}>{[currentUser.first_name,currentUser.last_name].filter(Boolean).join(" ")||currentUser.name}</div>
                 <div style={{fontSize:13,color:"var(--text3)"}}>{currentUser.email}</div>
-                <div className="user-badge" style={{marginTop:4}}>🎓 Student</div>
+                <div className="user-badge" style={{marginTop:4, display:"inline-flex", alignItems:"center", gap:4}}><GraduationCap size={12} /> Student</div>
               </div>
             </div>
             {profileError&&<div className="error-msg">{profileError}</div>}
@@ -1189,11 +1190,13 @@ function DayEventsModal({ ctx, date }) {
         onClick={() => { closeModal(); setTimeout(() => setModal({ type:"event-detail", data:e }), 50); }}>
         <div className="event-dot" style={{ background:evColor }} />
         <div className="event-info">
-          <div className="event-title">{e.isImportant ? "⭐ " : ""}{e.title}</div>
-          <div className="event-meta">
+          <div className="event-title" style={{ display:"flex", alignItems:"center", gap:4 }}>
+            {e.isImportant ? <Star size={13} style={{ color:"var(--yellow)", flexShrink:0 }} /> : ""}{e.title}
+          </div>
+          <div className="event-meta" style={{ display:"flex", alignItems:"center", flexWrap:"wrap" }}>
             {fmtTime(e.startTime)}–{fmtTime(e.endTime)}
             {cal ? <span style={{ marginLeft:8, color:evColor, fontWeight:600 }}>· {cal.name}</span> : ""}
-            {e.location ? ` · 📍 ${e.location}` : ""}
+            {e.location ? <span style={{ display:"inline-flex", alignItems:"center", gap:2, marginLeft:4 }}>· <MapPin size={11} /> {e.location}</span> : ""}
           </div>
         </div>
       </div>
@@ -1238,7 +1241,7 @@ function DayEventsModal({ ctx, date }) {
       <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div style={{ display:"flex", alignItems:"center", gap:10, flex:1 }}>
-            <span style={{ fontSize:20 }}>📅</span>
+            <span style={{ display:"inline-flex" }}><Calendar size={20} /></span>
             <div>
               <div className="modal-title">{dayLabel}</div>
               <div style={{ fontSize:12, color:"var(--text3)", marginTop:2 }}>
@@ -1247,7 +1250,7 @@ function DayEventsModal({ ctx, date }) {
               </div>
             </div>
           </div>
-          <button className="close-btn" onClick={closeModal}>✕</button>
+          <button className="close-btn" onClick={closeModal} style={{ display:"inline-flex" }}><X size={16} /></button>
         </div>
 
         <div style={{ padding:"0 24px" }}>
@@ -1255,7 +1258,7 @@ function DayEventsModal({ ctx, date }) {
             className="btn btn-primary"
             style={{ width:"100%", borderRadius:10, padding:"10px 0", fontSize:14, fontWeight:700, marginBottom:4, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
             onClick={() => { closeModal(); setTimeout(() => setModal({ type:"create-event", data:{ date } }), 50); }}>
-            <span style={{ fontSize:18 }}>＋</span> Add Event on {date.toLocaleDateString("en-PH", { month:"short", day:"numeric" })}
+            <Plus size={16} /> Add Event on {date.toLocaleDateString("en-PH", { month:"short", day:"numeric" })}
           </button>
         </div>
 
@@ -1263,7 +1266,7 @@ function DayEventsModal({ ctx, date }) {
           {/* Events section */}
           {dayEvts.length === 0 && dayTasks.length === 0 ? (
             <div className="empty-state" style={{ padding:"24px 0" }}>
-              <div className="empty-icon">✨</div>
+              <div className="empty-icon" style={{ display:"flex", justifyContent:"center" }}><Sparkles size={28} /></div>
               <div className="empty-title">No events this day</div>
               <div style={{ fontSize:13, color:"var(--text3)" }}>Tap the button above to add one!</div>
             </div>
@@ -1280,8 +1283,8 @@ function DayEventsModal({ ctx, date }) {
                 onClick={() => setTasksExpanded(p => !p)}
                 style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10, cursor:"pointer", userSelect:"none" }}>
                 <div style={{ flex:1, height:1, background:"var(--border)" }} />
-                <span style={{ fontSize:11, fontWeight:600, color:"var(--yellow)", letterSpacing:0.8, textTransform:"uppercase", whiteSpace:"nowrap" }}>
-                  {tasksExpanded ? "▴" : "▾"} Tasks ({dayTasks.length})
+                <span style={{ fontSize:11, fontWeight:600, color:"var(--yellow)", letterSpacing:0.8, textTransform:"uppercase", whiteSpace:"nowrap", display:"inline-flex", alignItems:"center", gap:4 }}>
+                  {tasksExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Tasks ({dayTasks.length})
                 </span>
                 <div style={{ flex:1, height:1, background:"var(--border)" }} />
               </div>
@@ -1337,18 +1340,18 @@ function AboutContent() {
   const roleColors = ["#6c63ff","#2dd4bf","#60a5fa","#34d399","#f472b6","#fb923c"];
 
   const stack = [
-    { name:"Go",         icon:"🔵", desc:"Backend & gRPC API" },
-    { name:"ConnectRPC", icon:"⚡", desc:"API protocol layer" },
-    { name:"React",      icon:"⚛️", desc:"Frontend framework" },
-    { name:"MongoDB",    icon:"🍃", desc:"Database" },
-    { name:"Nginx",      icon:"🌐", desc:"Reverse proxy" },
+    { name:"Go",         icon:CircleDot, desc:"Backend & gRPC API" },
+    { name:"ConnectRPC", icon:Zap,       desc:"API protocol layer" },
+    { name:"React",      icon:Atom,      desc:"Frontend framework" },
+    { name:"MongoDB",    icon:Leaf,      desc:"Database" },
+    { name:"Nginx",      icon:Globe,     desc:"Reverse proxy" },
   ];
 
   const features = [
-    { icon:"📅", label:"Calendar Sharing" },
-    { icon:"📝", label:"Task Tracking" },
-    { icon:"👥", label:"Group Calendars" },
-    { icon:"✨", label:"AI Tools" },
+    { icon:Calendar,      label:"Calendar Sharing" },
+    { icon:ClipboardList, label:"Task Tracking" },
+    { icon:Users,         label:"Group Calendars" },
+    { icon:Sparkles,      label:"AI Tools" },
   ];
 
   return (
@@ -1374,7 +1377,7 @@ function AboutContent() {
             border:"1px solid rgba(108,99,255,0.3)", borderRadius:20, padding:"4px 14px",
             fontSize:11, fontWeight:700, color:"var(--accent2)", letterSpacing:1.5,
             textTransform:"uppercase", marginBottom:20 }}>
-            🎓 DCISM Capstone Project
+            <GraduationCap size={13} /> DCISM Capstone Project
           </div>
 
           {/* App name */}
@@ -1402,7 +1405,7 @@ function AboutContent() {
               <div key={i} style={{ display:"flex", alignItems:"center", gap:7,
                 background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)",
                 borderRadius:10, padding:"8px 16px", fontSize:13, fontWeight:600, color:"rgba(240,240,248,0.8)" }}>
-                <span>{f.icon}</span> {f.label}
+                <f.icon size={14} /> {f.label}
               </div>
             ))}
           </div>
@@ -1438,7 +1441,7 @@ function AboutContent() {
               <div key={i} style={{ display:"flex", alignItems:"center", gap:12,
                 padding:"9px 12px", borderRadius:10, background:"var(--surface2)",
                 border:"1px solid var(--border)" }}>
-                <span style={{ fontSize:18, width:28, textAlign:"center" }}>{s.icon}</span>
+                <span style={{ width:28, display:"flex", justifyContent:"center", color:"var(--text2)" }}><s.icon size={18} /></span>
                 <div>
                   <div style={{ fontSize:13, fontWeight:700, color:"var(--text)", lineHeight:1.2 }}>{s.name}</div>
                   <div style={{ fontSize:11, color:"var(--text3)", marginTop:1 }}>{s.desc}</div>
@@ -1489,8 +1492,8 @@ function AboutContent() {
             University of San Carlos · DCISM · {new Date().getFullYear()}
           </div>
           <div style={{ display:"flex", gap:6 }}>
-            {["📅","📝","👥","✨"].map((e,i)=>(
-              <span key={i} style={{ fontSize:16, opacity:0.4 }}>{e}</span>
+            {[Calendar,ClipboardList,Users,Sparkles].map((Ic,i)=>(
+              <span key={i} style={{ opacity:0.4, display:"inline-flex" }}><Ic size={16} /></span>
             ))}
           </div>
         </div>
