@@ -888,18 +888,14 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
 // ─── TOPBAR ───────────────────────────────────────────────────────────────────
 function Topbar({ page, ctx, setPage, onMenuClick }) {
   const titles = {dashboard:"Dashboard",calendar:"Calendar View",events:"Events List",calendars:"Manage Calendars",organizations:"Organizations",tasks:"Task Tracker",ai:"AI Tools",settings:"Settings",about:"About SchedU"};
-  const { dataLoading, refreshCalendars, theme, toggleTheme } = ctx;
+  const { theme, toggleTheme } = ctx;
 
   return (
     <div className="topbar" style={{ position:"relative" }}>
-      <button className="hamburger" onClick={onMenuClick} style={{ display:"inline-flex" }}><Menu size={20} /></button>
       <div className="topbar-title font-head">{titles[page]||page}</div>
 
       <button className="theme-toggle" title={theme==="dark"?"Switch to Light Mode":"Switch to Dark Mode"} onClick={toggleTheme} style={{ display:"inline-flex" }}>
         {theme==="dark" ? <Sun size={16} /> : <Moon size={16} />}
-      </button>
-      <button className="btn-icon" title="Refresh" onClick={refreshCalendars} style={{ display:"inline-flex" }} data-tutorial="topbar-refresh">
-        <RefreshCw size={14} />
       </button>
     </div>
   );
